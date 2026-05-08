@@ -20,6 +20,7 @@ function formatReleaseNotes(releaseNotes) {
 }
 
 let autoUpdaterInstance = null;
+let shouldOpenDownloadPageForUpdate = false;
 
 function compareVersions(a, b) {
   const pa = String(a || '').replace(/^v/, '').split('.').map(Number);
@@ -64,7 +65,7 @@ function fetchLatestRelease() {
 }
 
 async function triggerUpdateDownload({ mainWindow, onProgress, onDownloaded, onError }) {
-  if (!autoUpdaterInstance) {
+  if (!autoUpdaterInstance || shouldOpenDownloadPageForUpdate) {
     shell.openExternal(LATEST_RELEASE_PAGE);
     return;
   }
@@ -120,6 +121,7 @@ function setupAutoUpdate({ app, mainWindow }) {
 
   const { autoUpdater } = require('electron-updater');
   autoUpdaterInstance = autoUpdater;
+  shouldOpenDownloadPageForUpdate = app.getName() === 'OpenBidKit_Yibiao';
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -166,7 +168,7 @@ function setupAutoUpdate({ app, mainWindow }) {
 
       const result = await dialog.showMessageBox(mainWindow, {
         type: 'info',
-        buttons: ['立即更新', '稍后'],
+        buttons: [shouldOpenDownloadPageForUpdate ? '打开下载页' : '立即更新', '稍后'],
         defaultId: 0,
         cancelId: 1,
         title: '发现新版本',
