@@ -595,3 +595,47 @@
 | Error | Attempt | Resolution |
 | --- | --- | --- |
 | additions-only smoke test 中完整目录 fake AI 返回旧编号，导致补目录阶段找不到 `1.1` | 第一次 smoke test | 将 fake 完整目录 ID 改为真实 `1`、`1.1`、`1.1.1` 后重跑通过 |
+
+## Current Task: Step04 正文编排阶段关联知识库
+
+### Goal
+在现有每个叶子节点的正文编排 JSON 中增加 `knowledge.item_ids`，编排阶段只提交知识库 `id/title/resume`，不提交知识库正文；不做单独全局知识库分配，不限制同一知识条目被多个叶子节点复用。
+
+### Phases
+- [completed] 1. 核对现有正文编排 JSON、`contentGenerationPlans` 落盘结构和知识库轻量引用读取方式。
+- [completed] 2. 扩展 `ContentGenerationPlanData` 与 Main 侧 `normalizeContentPlan()`，支持 `knowledge.item_ids`。
+- [completed] 3. 在正文编排 prompt 中加入固定顺序的知识库轻量清单，并要求 `knowledge.item_ids` 只从清单 ID 中选择。
+- [completed] 4. 让正文生成任务接收 `reference_knowledge_document_ids`，并复用知识库轻量条目读取服务。
+- [completed] 5. 运行 CJS 语法检查、知识库编排归一化 smoke test、`npm run build` 和 `git diff --check`。
+
+### Decisions
+- 知识库关联直接并入现有叶子节点编排，不新增全局知识库编排阶段。
+- 编排阶段不需要 `reason`；只落盘 `knowledge.item_ids`。
+- 归一化只做本叶子节点内去重和非法 ID 过滤，不限制同一知识条目跨叶子节点复用。
+- 本轮不改正文生成 prompt，不读取知识库正文，只先完成编排阶段关联落盘。
+
+### Errors Encountered
+| Error | Attempt | Resolution |
+| --- | --- | --- |
+| PowerShell 中首次 `node -e` smoke test 使用外层单引号导致传给 Node 的 JS 字符串引号被剥离 | 第一次 smoke test | 改用外层双引号、JS 字符串使用单引号后重跑通过 |
+
+## Current Task: Step04 正文生成阶段应用知识库
+
+### Goal
+在正文生成阶段消费编排结果中的 `knowledge.item_ids`：程序读取对应知识条目的 `content`，并在正文生成 prompt 中只注入 content，不暴露知识库 ID、标题、简介或来源字段；素材消息放在章节动态信息之前以保持缓存友好。
+
+### Phases
+- [completed] 1. 确认知识库最终条目落盘字段和正文生成 prompt 当前消息顺序。
+- [completed] 2. 新增知识库正文素材 Map，按 `documentId::itemId` 定位 `items.json` 中的 `content`。
+- [completed] 3. 在 `runOne()` 中按当前小节 `contentPlan.knowledge.item_ids` 解析正文素材并传入正文生成 prompt。
+- [completed] 4. 调整正文生成消息顺序：项目概述之后、上级/同级/当前章节之前注入知识库 content。
+- [completed] 5. 运行 CJS 语法检查、正文 prompt content-only smoke test、`npm run build` 和 `git diff --check`。
+
+### Decisions
+- 给正文模型的知识库素材只包含 `content`，不传 `id/title/resume/source_file/source_block_ids`。
+- 素材按知识库读取顺序输出，保证相同素材组合时 prompt 顺序稳定。
+- 没有匹配内容或条目正文为空时不追加知识库素材消息。
+
+### Errors Encountered
+| Error | Attempt | Resolution |
+| --- | --- | --- |

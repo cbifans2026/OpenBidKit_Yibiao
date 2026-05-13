@@ -379,7 +379,10 @@ function KnowledgeBasePage() {
               {documents.map((document) => (
                 <article className="knowledge-document-card" key={document.id}>
                   <div className="knowledge-document-title">
-                    <strong>{document.file_name}</strong>
+                    <div className="knowledge-document-name">
+                      <strong>{document.file_name}</strong>
+                      {developerMode && <code className="knowledge-entity-id">文档ID：{document.id}</code>}
+                    </div>
                     <span className={`knowledge-status is-${document.status}`}>{statusLabels[document.status]}</span>
                   </div>
                   <div className="knowledge-progress-track" aria-label={`处理进度 ${document.progress}%`}>
@@ -449,6 +452,7 @@ function KnowledgeDocumentViewer({
         <div className="knowledge-breadcrumb">
           <span>知识库</span>
           <strong>{document.file_name}</strong>
+          {developerMode && <code className="knowledge-entity-id">文档ID：{document.id}</code>}
           <small>{mode === 'analysis' ? '分析调试' : mode === 'items' ? `${document.item_count || 0} 条知识` : 'Markdown 原文'}</small>
         </div>
         <div className="knowledge-toolbar-actions">
@@ -474,6 +478,7 @@ function KnowledgeDocumentViewer({
           <div className="knowledge-item-list knowledge-viewer-item-list">
             {itemsPreview.length ? itemsPreview.map((item) => (
               <article className="knowledge-item-card" key={item.id}>
+                {developerMode && <code className="knowledge-entity-id">条目ID：{item.id}</code>}
                 <strong>{item.title}</strong>
                 <p>{item.resume}</p>
                 <details>

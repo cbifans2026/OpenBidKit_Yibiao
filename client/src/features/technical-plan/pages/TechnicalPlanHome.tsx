@@ -180,6 +180,10 @@ function TechnicalPlanHome() {
           return {
             ...prev,
             outlineGenerationTask: trimTaskLogs(technicalPlan.outlineGenerationTask) || latestTask,
+            outlineMode: technicalPlan.outlineMode ?? prev.outlineMode,
+            referenceKnowledgeDocumentIds: Array.isArray(technicalPlan.referenceKnowledgeDocumentIds)
+              ? technicalPlan.referenceKnowledgeDocumentIds
+              : prev.referenceKnowledgeDocumentIds,
             outlineData: nextOutlineData,
             contentGenerationTask: nextOutlineData !== prev.outlineData ? undefined : prev.contentGenerationTask,
             contentGenerationSections: nextOutlineData !== prev.outlineData ? {} : prev.contentGenerationSections,
@@ -191,6 +195,10 @@ function TechnicalPlanHome() {
           return {
             ...prev,
             contentGenerationTask: latestTask || trimTaskLogs(technicalPlan.contentGenerationTask),
+            outlineMode: technicalPlan.outlineMode ?? prev.outlineMode,
+            referenceKnowledgeDocumentIds: Array.isArray(technicalPlan.referenceKnowledgeDocumentIds)
+              ? technicalPlan.referenceKnowledgeDocumentIds
+              : prev.referenceKnowledgeDocumentIds,
             contentGenerationSections: technicalPlan.contentGenerationSections || prev.contentGenerationSections,
             contentGenerationPlans: technicalPlan.contentGenerationPlans || prev.contentGenerationPlans,
             outlineData: technicalPlan.outlineData || prev.outlineData,
@@ -477,6 +485,7 @@ function TechnicalPlanHome() {
         <ContentEditPage
           outlineData={state.outlineData}
           projectOverview={state.projectOverview}
+          referenceKnowledgeDocumentIds={state.referenceKnowledgeDocumentIds}
           task={state.contentGenerationTask}
           sections={state.contentGenerationSections}
           onContentSaved={saveChapterContent}

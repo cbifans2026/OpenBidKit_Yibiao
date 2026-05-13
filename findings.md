@@ -72,3 +72,6 @@
 - Step03 Patch 未落盘 `knowledge_item_ids` 的根因已确认：模型照抄 prompt 示例中的 `document_id::K000001` 占位 ID，而真实 ID 是 `doc-00665a28-...::K000001`；同时模型把部分 additions 挂到三级目录，违反“不能新增四级目录”的规则。新实现通过真实白名单提示和严格校验修复该类问题。
 - Step03 旧 Patch 仍把任务建模成“绑定知识库 ID + 可新增二/三级目录”，会把弱模型注意力拉向 `bindings` 和 `knowledge_item_ids`，与当前目标“只补缺失三级目录”冲突。新方案应完全不向模型暴露知识 ID，只把知识条目的标题/摘要作为参考文本。
 - additions-only 后，Step03 知识库增强的可靠边界更清晰：AI 只决定“某个现有二级目录下是否缺一个三级目录”，程序负责编号、去重、删除多余字段和防止知识 ID 落盘；如果模型返回 bindings-only 或完整 outline，normalizer 会触发专用修复 prompt，而不是静默写入无效绑定。
+- Step04 知识库编排不需要单独全局分配阶段：将完整知识库轻量清单作为每个叶子节点编排请求的稳定前缀即可利用服务商缓存；多对多关系通过每个叶子节点独立选择 `knowledge.item_ids` 自然产生，不需要全局唯一性约束。
+- Step04 编排阶段的知识库输入边界应保持为 `id/title/resume`，不提交 `content`；当前实现只落盘 `knowledge.item_ids`，正文生成阶段暂不消费知识库正文。
+- Step04 正文生成阶段应用知识库的最小边界：程序用 `knowledge.item_ids` 定位条目，但给正文模型只传 `content`；知识库素材放在项目概述之后、章节上下文之前，可让相同素材组合在不同章节间尽量复用服务商 prompt cache 前缀。

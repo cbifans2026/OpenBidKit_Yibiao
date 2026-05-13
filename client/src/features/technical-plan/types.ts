@@ -66,6 +66,9 @@ export type ContentGenerationSections = Record<string, ContentGenerationSectionS
 export type ContentIllustrationType = 'ai' | 'mermaid' | 'none';
 
 export interface ContentGenerationPlanData {
+  knowledge: {
+    item_ids: string[];
+  };
   table: {
     needed: boolean;
     purpose: string;

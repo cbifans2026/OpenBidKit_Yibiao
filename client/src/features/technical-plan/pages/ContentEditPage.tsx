@@ -12,6 +12,7 @@ import type { BackgroundTaskState, ContentGenerationSectionStatus, ContentGenera
 interface ContentEditPageProps {
   outlineData: OutlineData | null;
   projectOverview: string;
+  referenceKnowledgeDocumentIds: string[];
   task?: BackgroundTaskState;
   sections: ContentGenerationSections;
   onContentSaved: (item: OutlineItem, content: string) => Promise<void> | void;
@@ -259,7 +260,7 @@ const MarkdownContent = memo(function MarkdownContent({ content, onPreviewImage 
   );
 });
 
-function ContentEditPage({ outlineData, projectOverview, task, sections, onContentSaved, onContentReset }: ContentEditPageProps) {
+function ContentEditPage({ outlineData, projectOverview, referenceKnowledgeDocumentIds, task, sections, onContentSaved, onContentReset }: ContentEditPageProps) {
   const { showToast } = useToast();
   const leaves = useMemo(() => outlineData?.outline ? collectLeafItems(outlineData.outline) : [], [outlineData]);
   const [selectedItemId, setSelectedItemId] = useState('');
@@ -387,6 +388,7 @@ function ContentEditPage({ outlineData, projectOverview, task, sections, onConte
       await window.yibiao?.tasks.startContentGeneration({
         outlineData: nextOutlineData,
         projectOverview: nextOutlineData.project_overview || projectOverview,
+        reference_knowledge_document_ids: referenceKnowledgeDocumentIds,
         regenerate,
         generationOptions: {
           useAiImages: imageModelAvailable && generationOptions.useAiImages,
@@ -410,6 +412,7 @@ function ContentEditPage({ outlineData, projectOverview, task, sections, onConte
       await window.yibiao?.tasks.startContentGeneration({
         outlineData,
         projectOverview: outlineData.project_overview || projectOverview,
+        reference_knowledge_document_ids: referenceKnowledgeDocumentIds,
         regenerate: true,
         targetItemId: requirementItem.id,
         requirement: regenerateRequirement,

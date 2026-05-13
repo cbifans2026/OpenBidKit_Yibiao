@@ -4004,6 +4004,25 @@ button {
   color: var(--yb-text);
 }
 
+.knowledge-document-name {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.knowledge-entity-id {
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: #475569;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  padding: 3px 7px;
+}
+
 .knowledge-folder-card small,
 .knowledge-document-meta,
 .knowledge-empty-box p,

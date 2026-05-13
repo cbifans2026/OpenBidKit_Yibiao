@@ -106,8 +106,22 @@ function normalizePriority(value) {
   return Math.max(1, Math.min(priority || 3, 5));
 }
 
-function normalizeContentPlan(value) {
+function normalizeKnowledgeItemIds(value, allowedKnowledgeItemIds) {
+  const source = Array.isArray(value) ? value : [];
+  const ids = source.map((id) => String(id || '').trim()).filter(Boolean);
+  const filtered = allowedKnowledgeItemIds instanceof Set
+    ? ids.filter((id) => allowedKnowledgeItemIds.has(id))
+    : ids;
+  return [...new Set(filtered)];
+}
+
+function normalizeContentPlan(value, allowedKnowledgeItemIds) {
   const source = value?.plan && typeof value.plan === 'object' ? value.plan : value || {};
+  const knowledgeSource = source.knowledge;
+  const knowledge = knowledgeSource && typeof knowledgeSource === 'object' && !Array.isArray(knowledgeSource) ? knowledgeSource : {};
+  const rawKnowledgeItemIds = Array.isArray(knowledgeSource)
+    ? knowledgeSource
+    : knowledge.item_ids ?? knowledge.itemIds ?? knowledge.knowledge_item_ids ?? source.knowledge_item_ids ?? source.knowledgeItemIds;
   const table = source.table && typeof source.table === 'object' ? source.table : {};
   const image = source.image && typeof source.image === 'object' ? source.image : {};
   const mermaid = source.mermaid && typeof source.mermaid === 'object' ? source.mermaid : {};
@@ -121,6 +135,9 @@ function normalizeContentPlan(value) {
   const imageNeeded = Boolean(image.needed) && Boolean(imageStyle && imageTitle && imagePrompt);
 
   return {
+    knowledge: {
+      item_ids: normalizeKnowledgeItemIds(rawKnowledgeItemIds, allowedKnowledgeItemIds),
+    },
     table: {
       needed: tableNeeded,
       purpose: tableNeeded ? singleLine(table.purpose) : '',
@@ -186,6 +203,9 @@ function pruneContentGenerationPlans(plans, leaves) {
 function validateContentPlan(plan) {
   if (!plan || typeof plan !== 'object') {
     throw new Error('正文编排决策必须是对象');
+  }
+  if (!plan.knowledge || !Array.isArray(plan.knowledge.item_ids)) {
+    throw new Error('正文编排决策缺少 knowledge.item_ids');
   }
   if (!plan.table || typeof plan.table.needed !== 'boolean') {
     throw new Error('正文编排决策缺少 table.needed');
@@ -291,7 +311,15 @@ ${normalizeMermaidCode(invalidCode)}
   return messages;
 }
 
-function buildChapterContentPlanMessages({ chapter, parentChapters, siblingChapters, projectOverview, regenerateRequirement, imageGenerationAvailable, mermaidGenerationAvailable, maxAiImages, totalSections }) {
+function renderKnowledgeItemsForPrompt(items) {
+  return JSON.stringify((items || []).map((item) => ({
+    id: String(item.id || '').trim(),
+    title: String(item.title || '').trim(),
+    resume: String(item.resume || '').trim(),
+  })).filter((item) => item.id && item.title && item.resume), null, 2);
+}
+
+function buildChapterContentPlanMessages({ chapter, parentChapters, siblingChapters, projectOverview, regenerateRequirement, imageGenerationAvailable, mermaidGenerationAvailable, maxAiImages, totalSections, knowledgeItems }) {
   const chapterId = chapter.id || 'unknown';
   const chapterTitle = chapter.title || '未命名章节';
   const chapterDescription = chapter.description || '';
@@ -311,9 +339,16 @@ function buildChapterContentPlanMessages({ chapter, parentChapters, siblingChapt
 8. ${imageGenerationAvailable ? '不要求用满 AI 生图上限；但遇到具象工程对象或现场场景时，不要过度保守，可以适度提名候选。没有具象对象、空间关系或实物场景时仍不要硬插。' : '不要为了满足格式而编造 AI 生图需求。'}
 9. priority 含义：3 表示有价值候选，4 表示推荐，5 表示强推荐；只有达到 3 才将 image.needed 设为 true。
 10. engineering_diagram 表示工程图示风，适合系统架构、部署拓扑、设备连接、机柜布置、电池更换方案、施工组织或运维场景示意等具象工程图。
-11. realistic_photo 表示专业实景示意风，适合设备、场地、机房、施工现场、检测工具、运维操作等真实场景表现。`,
+11. realistic_photo 表示专业实景示意风，适合设备、场地、机房、施工现场、检测工具、运维操作等真实场景表现。
+12. knowledge.item_ids 只能从参考知识库轻量条目的 id 中选择；可以多选，可以为空数组；不要编造 id，不要输出 reason。`,
     },
   ];
+
+  messages.push({
+    role: 'user',
+    content: `参考知识库轻量条目（只包含 id、标题和简介，不包含正文；如无合适条目，knowledge.item_ids 返回空数组）：
+${renderKnowledgeItemsForPrompt(knowledgeItems)}`,
+  });
 
   if (String(projectOverview || '').trim()) {
     messages.push({ role: 'user', content: `项目概述信息：\n${projectOverview}` });
@@ -352,6 +387,9 @@ function buildChapterContentPlanMessages({ chapter, parentChapters, siblingChapt
 
 JSON 格式：
 {
+  "knowledge": {
+    "item_ids": ["从参考知识库轻量条目中选择的 id；没有合适条目时返回空数组"]
+  },
   "table": {
     "needed": true,
     "purpose": "说明表格在本小节中要表达什么；不需要表格时留空"
@@ -377,7 +415,13 @@ JSON 格式：
   return messages;
 }
 
-function buildChapterContentMessages({ chapter, parentChapters, siblingChapters, projectOverview, regenerateRequirement, contentPlan }) {
+function formatKnowledgeContentsForPrompt(contents) {
+  return (contents || [])
+    .map((content) => `<knowledge_content>\n${String(content || '').trim()}\n</knowledge_content>`)
+    .join('\n\n');
+}
+
+function buildChapterContentMessages({ chapter, parentChapters, siblingChapters, projectOverview, regenerateRequirement, contentPlan, knowledgeContents }) {
   const chapterId = chapter.id || 'unknown';
   const chapterTitle = chapter.title || '未命名章节';
   const chapterDescription = chapter.description || '';
@@ -402,6 +446,17 @@ function buildChapterContentMessages({ chapter, parentChapters, siblingChapters,
 
   if (String(projectOverview || '').trim()) {
     messages.push({ role: 'user', content: `项目概述信息：\n${projectOverview}` });
+  }
+
+  if (knowledgeContents?.length) {
+    messages.push({
+      role: 'user',
+      content: '参考正文素材使用规则：以下内容只作为可吸收的技术素材。请改写为当前项目语境下的投标技术方案正文，不要照抄，不要提到“知识库”“历史文档”“参考资料”或素材来源。',
+    });
+    messages.push({
+      role: 'user',
+      content: `参考正文素材：\n${formatKnowledgeContentsForPrompt(knowledgeContents)}`,
+    });
   }
 
   if (parentChapters?.length) {
@@ -470,6 +525,84 @@ function collectLeafContexts(items, parents = []) {
     results.push(...collectLeafContexts(children, [...parents, item]));
   }
   return results;
+}
+
+function normalizeReferenceDocumentIds(payload, storedPlan) {
+  const raw = payload?.reference_knowledge_document_ids
+    ?? payload?.referenceKnowledgeDocumentIds
+    ?? storedPlan?.referenceKnowledgeDocumentIds
+    ?? [];
+  return Array.isArray(raw)
+    ? [...new Set(raw.map((id) => String(id || '').trim()).filter(Boolean))]
+    : [];
+}
+
+function loadContentKnowledgeItems(knowledgeBaseService, documentIds, log) {
+  if (!documentIds.length) {
+    log('本次正文编排未选择参考知识库。');
+    return [];
+  }
+  if (!knowledgeBaseService?.getOutlineReferences) {
+    log('未找到知识库读取服务，正文编排不使用知识库。');
+    return [];
+  }
+
+  try {
+    const result = knowledgeBaseService.getOutlineReferences(documentIds);
+    const items = Array.isArray(result?.items) ? result.items.map((item) => ({
+      id: String(item?.id || '').trim(),
+      title: String(item?.title || '').trim(),
+      resume: String(item?.resume || '').trim(),
+    })).filter((item) => item.id && item.title && item.resume) : [];
+    log(items.length ? `正文编排已读取 ${items.length} 条知识库轻量条目。` : '未读取到可用知识库轻量条目，正文编排不使用知识库。');
+    return items;
+  } catch (error) {
+    log(`读取正文编排参考知识库失败，已跳过：${error.message || String(error)}`);
+    return [];
+  }
+}
+
+function loadContentKnowledgeContentMap(knowledgeBaseService, documentIds, log) {
+  const map = new Map();
+  if (!documentIds.length || !knowledgeBaseService?.readItems) {
+    return map;
+  }
+
+  for (const documentId of documentIds) {
+    try {
+      const items = knowledgeBaseService.readItems(documentId);
+      for (const item of Array.isArray(items) ? items : []) {
+        const itemId = String(item?.id || '').trim();
+        const content = String(item?.content || '').trim();
+        if (!itemId || !content) {
+          continue;
+        }
+        map.set(`${documentId}::${itemId}`, { content });
+      }
+    } catch (error) {
+      log(`读取知识库正文素材失败，已跳过文档 ${documentId}：${error.message || String(error)}`);
+    }
+  }
+
+  if (map.size) {
+    log(`正文生成可用知识库正文素材 ${map.size} 条。`);
+  }
+  return map;
+}
+
+function resolveKnowledgeContents(itemIds, knowledgeContentMap) {
+  const selected = new Set(normalizeKnowledgeItemIds(itemIds));
+  if (!selected.size || !(knowledgeContentMap instanceof Map) || !knowledgeContentMap.size) {
+    return [];
+  }
+
+  const contents = [];
+  for (const [id, item] of knowledgeContentMap.entries()) {
+    if (selected.has(id) && item?.content) {
+      contents.push(item.content);
+    }
+  }
+  return contents;
 }
 
 function updateOutlineItemContent(items, targetId, content) {
@@ -733,7 +866,7 @@ function withSection(sections, item, partial) {
   };
 }
 
-async function runContentGenerationTask({ aiService, workspaceStore, updateTask, payload }) {
+async function runContentGenerationTask({ aiService, workspaceStore, knowledgeBaseService, updateTask, payload }) {
   const storedPlan = workspaceStore.loadTechnicalPlan() || {};
   let outlineData = payload.outlineData || storedPlan.outlineData;
 
@@ -756,6 +889,7 @@ async function runContentGenerationTask({ aiService, workspaceStore, updateTask,
   const regenerateRequirement = String(payload.requirement || '').trim();
   const concurrency = Math.max(1, Math.min(Number(payload.concurrency) || 5, 8));
   const generationOptions = payload.generationOptions || payload.generation_options || {};
+  const referenceKnowledgeDocumentIds = normalizeReferenceDocumentIds(payload, storedPlan);
   const imageAvailability = aiService.getImageModelAvailability
     ? aiService.getImageModelAvailability()
     : { available: false, message: '生图模型不可用' };
@@ -777,6 +911,9 @@ async function runContentGenerationTask({ aiService, workspaceStore, updateTask,
   };
   const contentPlans = new Map();
   let storedContentPlans = pruneContentGenerationPlans(fullRegenerate ? {} : storedPlan.contentGenerationPlans, leaves);
+  let knowledgeItems = [];
+  let allowedKnowledgeItemIds = new Set();
+  let knowledgeContentMap = new Map();
   let selectedAiImageIds = new Set();
   let aiImageTargets = [];
   let mermaidImageTargets = [];
@@ -802,6 +939,13 @@ async function runContentGenerationTask({ aiService, workspaceStore, updateTask,
   logs = [...logs, mermaidImagesEnabled
     ? 'Mermaid 图片已启用，适合简单图示的小节会优先使用 Mermaid 图。'
     : 'Mermaid 图片未启用。'];
+  knowledgeItems = loadContentKnowledgeItems(knowledgeBaseService, referenceKnowledgeDocumentIds, (message) => {
+    logs = [...logs, message];
+  });
+  allowedKnowledgeItemIds = new Set(knowledgeItems.map((item) => item.id));
+  knowledgeContentMap = loadContentKnowledgeContentMap(knowledgeBaseService, referenceKnowledgeDocumentIds, (message) => {
+    logs = [...logs, message];
+  });
 
   function statsSnapshot() {
     contentStats.generation_completed = leaves.filter(({ item }) => ['success', 'error'].includes(sections[item.id]?.status)).length;
@@ -812,6 +956,7 @@ async function runContentGenerationTask({ aiService, workspaceStore, updateTask,
     outlineData,
     contentGenerationSections: sections,
     contentGenerationPlans: storedContentPlans,
+    referenceKnowledgeDocumentIds,
     contentGenerationTask: updateTask({ status: 'running', progress: progressFor(leaves, sections), logs, stats: statsSnapshot() }),
   });
   updateTask({ status: 'running', progress: progressFor(leaves, sections), logs, stats: statsSnapshot() }, technicalPlan);
@@ -899,21 +1044,22 @@ async function runContentGenerationTask({ aiService, workspaceStore, updateTask,
           mermaidGenerationAvailable: mermaidImagesEnabled,
           maxAiImages,
           totalSections: tasksToRun.length,
+          knowledgeItems,
         }),
         temperature: 0.2,
         progressLabel: '正文编排决策',
         failureMessage: '模型返回的正文编排决策格式无效',
-        normalizer: normalizeContentPlan,
+        normalizer: (value) => normalizeContentPlan(value, allowedKnowledgeItemIds),
         validator: validateContentPlan,
       });
     } catch (error) {
-      contentPlan = normalizeContentPlan({});
+      contentPlan = normalizeContentPlan({}, allowedKnowledgeItemIds);
       logs = [...logs, `编排失败：${item.id} ${item.title || '未命名章节'}，${error.message || '模型返回无效'}，将按纯正文生成。`];
     }
 
     contentPlans.set(item.id, contentPlan);
     contentStats.planning_completed += 1;
-    logs = [...logs, `编排完成：${item.id} ${item.title || '未命名章节'}（表格：${contentPlan.table.needed ? '需要' : '不需要'}，Mermaid：${contentPlan.mermaid.needed ? '需要' : '不需要'}，AI 图：${contentPlan.image.needed ? '需要' : '不需要'}）`];
+    logs = [...logs, `编排完成：${item.id} ${item.title || '未命名章节'}（知识库：${contentPlan.knowledge.item_ids.length} 条，表格：${contentPlan.table.needed ? '需要' : '不需要'}，Mermaid：${contentPlan.mermaid.needed ? '需要' : '不需要'}，AI 图：${contentPlan.image.needed ? '需要' : '不需要'}）`];
     updateTask({ status: 'running', progress: progressFor(leaves, sections), logs, stats: statsSnapshot() }, workspaceStore.loadTechnicalPlan());
   }
 
@@ -1000,9 +1146,10 @@ async function runContentGenerationTask({ aiService, workspaceStore, updateTask,
 
     try {
       const contentPlan = contentPlans.get(item.id) || normalizeContentPlan({});
+      const knowledgeContents = resolveKnowledgeContents(contentPlan.knowledge?.item_ids, knowledgeContentMap);
 
       await aiService.streamChat({
-        messages: buildChapterContentMessages({ chapter: item, parentChapters, siblingChapters, projectOverview, regenerateRequirement, contentPlan }),
+        messages: buildChapterContentMessages({ chapter: item, parentChapters, siblingChapters, projectOverview, regenerateRequirement, contentPlan, knowledgeContents }),
         temperature: 0.7,
       }, (event) => {
         if (event.type !== 'chunk' || !event.chunk) {
