@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agnet-analytics-dashboard",
+  "compatibility_date": "2026-05-14",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "static.analytics.agnet.top",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "404-page"
+  }
+}

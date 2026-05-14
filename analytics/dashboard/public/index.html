@@ -261,7 +261,7 @@
     <header class="hero">
       <div>
         <h1>埋点统计看板</h1>
-        <p>Cloudflare Workers + Analytics Engine + Cloudflare Pages</p>
+        <p>Cloudflare Workers + Analytics Engine + Workers Static Assets</p>
       </div>
       <div class="status">
         <span id="statusDot" class="dot"></span>
@@ -280,7 +280,8 @@
       </label>
       <label>
         项目
-        <select id="projectName"><option value="">请先刷新</option></select>
+        <input id="projectName" value="yibiao-client" placeholder="输入项目名，例如 yibiao-client" list="projectOptions" />
+        <datalist id="projectOptions"></datalist>
       </label>
       <label>
         时间范围
@@ -293,7 +294,7 @@
       <button id="refreshButton">刷新</button>
     </section>
 
-    <div class="panel hint">Token 只保存在当前浏览器 localStorage，不写入仓库，也不会提交到 Cloudflare Pages。</div>
+    <div class="panel hint">Token 只保存在当前浏览器 localStorage，不写入仓库，也不会提交到服务端。</div>
     <div id="errorBox" class="error"></div>
 
     <section class="cards">
@@ -333,6 +334,7 @@
       apiBase: $('apiBase'),
       adminToken: $('adminToken'),
       projectName: $('projectName'),
+      projectOptions: $('projectOptions'),
       days: $('days'),
       refreshButton: $('refreshButton'),
       errorBox: $('errorBox'),
@@ -380,6 +382,7 @@
     function loadSettings() {
       state.apiBase.value = localStorage.getItem('analytics_api_base') || state.apiBase.value;
       state.adminToken.value = localStorage.getItem('analytics_admin_token') || '';
+      state.projectName.value = localStorage.getItem('analytics_project_name') || state.projectName.value;
       state.days.value = localStorage.getItem('analytics_days') || '30';
     }
 
@@ -403,25 +406,6 @@
       return data;
     }
 
-    async function loadProjects() {
-      const previous = state.projectName.value || localStorage.getItem('analytics_project_name') || '';
-      const data = await requestJson('/api/projects');
-      state.projectName.innerHTML = '';
-
-      for (const project of data.projects || []) {
-        const option = document.createElement('option');
-        option.value = project;
-        option.textContent = project;
-        state.projectName.appendChild(option);
-      }
-
-      const hasPrevious = Array.from(state.projectName.options).some((option) => option.value === previous);
-      if (hasPrevious) state.projectName.value = previous;
-      if (!state.projectName.value && state.projectName.options.length > 0) {
-        state.projectName.value = state.projectName.options[0].value;
-      }
-    }
-
     function normalizeDaily(rows) {
       const map = new Map();
       for (const row of rows || []) {
@@ -433,6 +417,21 @@
         if (row.event === 'page_view') item.pageView += Number(row.count || 0);
       }
       return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+    }
+
+    async function loadProjectOptions() {
+      try {
+        const data = await requestJson('/api/projects');
+        state.projectOptions.innerHTML = '';
+
+        for (const project of data.projects || []) {
+          const option = document.createElement('option');
+          option.value = project;
+          state.projectOptions.appendChild(option);
+        }
+      } catch {
+        // 项目列表只是输入提示，失败不影响按项目名查询。
+      }
     }
 
     function renderTable(target, rows, columns, emptyText) {
@@ -464,9 +463,9 @@
           throw new Error('请先输入 ADMIN_TOKEN');
         }
 
-        await loadProjects();
+        await loadProjectOptions();
         if (!state.projectName.value) {
-          throw new Error('没有可用项目，请检查 Worker 的 ALLOWED_PROJECTS');
+          throw new Error('请先输入项目名');
         }
 
         saveSettings();

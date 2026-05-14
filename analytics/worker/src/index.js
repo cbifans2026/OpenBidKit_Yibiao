@@ -23,15 +23,8 @@ function normalizeText(value, maxLength) {
   return String(value || '').trim().slice(0, maxLength);
 }
 
-function getAllowedProjects(env) {
-  return String(env.ALLOWED_PROJECTS || '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter((item) => PROJECT_NAME_PATTERN.test(item));
-}
-
-function isAllowedProject(env, projectName) {
-  return PROJECT_NAME_PATTERN.test(projectName) && getAllowedProjects(env).includes(projectName);
+function isValidProjectName(projectName) {
+  return PROJECT_NAME_PATTERN.test(projectName);
 }
 
 function requireAdmin(request, env) {
@@ -124,7 +117,7 @@ async function handleTrack(request, env) {
     const arch = normalizeText(body.arch, 50);
     const clientId = normalizeText(body.client_id || body.clientId, 120);
 
-    if (!isAllowedProject(env, projectName)) {
+    if (!isValidProjectName(projectName)) {
       return json({ code: 400, message: 'invalid projectName' }, { status: 400 });
     }
 
@@ -157,10 +150,24 @@ async function handleProjects(request, env) {
     return json({ code: 401, message: 'unauthorized' }, { status: 401 });
   }
 
-  return json({
-    code: 0,
-    projects: getAllowedProjects(env),
-  });
+  const sql = `
+    SELECT
+      blob1 AS projectName
+    FROM ${DATASET}
+    WHERE timestamp >= NOW() - INTERVAL '90' DAY
+    GROUP BY projectName
+    ORDER BY projectName ASC
+  `;
+
+  try {
+    const result = await queryAnalytics(env, sql);
+    return json({
+      code: 0,
+      projects: (result.data || []).map((item) => item.projectName).filter(Boolean),
+    });
+  } catch {
+    return json({ code: 500, message: 'query failed' }, { status: 500 });
+  }
 }
 
 async function handleSummary(request, env, url) {
@@ -175,7 +182,7 @@ async function handleSummary(request, env, url) {
   const projectName = normalizeText(url.searchParams.get('projectName'), 80);
   const days = safeDays(url.searchParams.get('days'));
 
-  if (!isAllowedProject(env, projectName)) {
+  if (!isValidProjectName(projectName)) {
     return json({ code: 400, message: 'invalid projectName' }, { status: 400 });
   }
 
@@ -251,7 +258,7 @@ async function handleLatest(request, env, url) {
   const projectName = normalizeText(url.searchParams.get('projectName'), 80);
   const limit = safeLimit(url.searchParams.get('limit'));
 
-  if (!isAllowedProject(env, projectName)) {
+  if (!isValidProjectName(projectName)) {
     return json({ code: 400, message: 'invalid projectName' }, { status: 400 });
   }
 
