@@ -79,3 +79,6 @@
 - Step04 知识库编排不需要单独全局分配阶段：将完整知识库轻量清单作为每个叶子节点编排请求的稳定前缀即可利用服务商缓存；多对多关系通过每个叶子节点独立选择 `knowledge.item_ids` 自然产生，不需要全局唯一性约束。
 - Step04 编排阶段的知识库输入边界应保持为 `id/title/resume`，不提交 `content`；当前实现只落盘 `knowledge.item_ids`，正文生成阶段暂不消费知识库正文。
 - Step04 正文生成阶段应用知识库的最小边界：程序用 `knowledge.item_ids` 定位条目，但给正文模型只传 `content`；知识库素材放在项目概述之后、章节上下文之前，可让相同素材组合在不同章节间尽量复用服务商 prompt cache 前缀。
+- 知识库当前已有日志只覆盖 `查看原文` 和全文 Markdown 内容渲染阶段；`openDocument()` 的点击、IPC 读取、JSON 解析、`setItemsPreview`、条目列表整体渲染和下一帧可见尚未被记录，这正是继续定位用户感知慢点的缺口。
+- 新增 `document-items` trace 后，条目页会记录 `click:open-document`、`ipc:read:start/end`、`items:metrics`、`state:set-items-preview`、React Profiler、`dom:commit`、`dom:next-frame-visible` 和 Long Task；可与 `document-markdown`、`item-source` trace 直接对比。
+- 知识条目列表滚动重置的根因是此前 `sourceItem ? 原文页 : 列表` 会用原文视图替换条目列表，列表 DOM 被卸载；改为 Dialog 后列表保持挂载，关闭原文不会丢失滚动位置。

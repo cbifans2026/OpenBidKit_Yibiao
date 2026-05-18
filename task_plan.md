@@ -660,3 +660,43 @@
 ### Errors Encountered
 | Error | Attempt | Resolution |
 | --- | --- | --- |
+
+## Current Task: 知识库查看链路性能埋点
+
+### Goal
+补充知识库开发者模式渲染调试日志，覆盖从点击“查看条目/Markdown”到 IPC 读取、状态更新、条目列表渲染、DOM 提交和下一帧可见的完整链路，用于定位用户感知慢点。
+
+### Phases
+- [completed] 1. 记录当前代码结构和已有日志覆盖范围。
+- [completed] 2. 实现 `openDocument()` 读取链路日志和内容规模统计。
+- [completed] 3. 给知识条目列表增加 Profiler、DOM 指标、Long Task 和下一帧可见日志。
+- [completed] 4. 保持日志仅开发者模式启用，并兼容现有复制日志按钮。
+- [completed] 5. 运行构建验证并记录结果。
+
+### Decisions
+- 不继续盲调 `查看原文`，先用日志确认慢点位于读取、IPC、JSON 解析、列表渲染还是单条原文渲染。
+- 本轮只加开发者模式诊断日志，不改变知识库业务流程和自动匹配逻辑。
+
+### Errors Encountered
+| Error | Attempt | Resolution |
+| --- | --- | --- |
+| `collectItemsContentMetrics()` 返回的 `metrics` 被 TypeScript 推断成不含 `chars` 的窄类型 | 第一次 `npm run build` | 将集合指标显式声明为 `Record<string, number>` 后重跑构建通过 |
+
+## Current Task: 知识条目原文弹窗化
+
+### Goal
+将知识库“查看原文”从页面内替换/跳转改为弹窗，关闭后保持条目列表 DOM 和滚动位置，避免用户在列表底部查看原文后回到顶部。
+
+### Phases
+- [completed] 1. 查找现有 Radix Dialog 用法和知识库原文查看代码。
+- [completed] 2. 将原文查看改为 Dialog，条目列表始终渲染。
+- [completed] 3. 新增知识库原文弹窗遮罩、卡片、标题和正文内部滚动样式。
+- [completed] 4. 运行 `npm run build` 验证。
+
+### Decisions
+- 保留现有 `openSourceItem()`、`closeSourceItem()`、`sourceTrace` 和 `sourceRendering` 调试链路。
+- 弹窗关闭只清理当前原文状态，不卸载条目列表。
+
+### Errors Encountered
+| Error | Attempt | Resolution |
+| --- | --- | --- |
