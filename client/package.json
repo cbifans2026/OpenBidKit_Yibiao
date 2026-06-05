@@ -34,7 +34,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "FB208",
+        "owner": "cbifans2026",
         "repo": "OpenBidKit_Yibiao",
         "releaseType": "release"
       }
