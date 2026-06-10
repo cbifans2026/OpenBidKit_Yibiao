@@ -23,7 +23,6 @@ export const appMenuItems: AppMenuItem[] = [
         label: '已有方案扩写',
         description: '解决人写技术方案太薄的问题，上传写好的方案，进行优化和扩充，遵从原方案真实可落地，又能扩写出厚厚的标书',
         icon: 'expand',
-        notice: githubStarNotice,
       },
       {
         id: 'business-bid',
@@ -38,6 +37,21 @@ export const appMenuItems: AppMenuItem[] = [
     id: 'knowledge-base',
     label: '知识库',
     description: '素材、模板和案例资产',
+    children: [
+      {
+        id: 'document-knowledge-base',
+        label: '文档知识库',
+        description: '管理文档资料、案例素材和可复用知识条目',
+        icon: 'document',
+      },
+      {
+        id: 'image-knowledge-base',
+        label: '图片知识库',
+        description: '管理图片素材、图示和视觉参考资料',
+        icon: 'file',
+        notice: githubStarNotice,
+      },
+    ],
   },
   {
     id: 'bid-check',
@@ -56,7 +70,19 @@ export const appMenuItems: AppMenuItem[] = [
         description: '硬性条款与响应完整性',
         icon: 'shield',
       },
+      {
+        id: 'ai-evaluation',
+        label: 'AI评标',
+        description: '模拟AI评标，对标书进行打分，出具评标报告',
+        icon: 'tool',
+        notice: githubStarNotice,
+      },
     ],
+  },
+  {
+    id: 'export-format',
+    label: '导出格式',
+    description: 'Word 文档排版与编号格式设置',
   },
   {
     id: 'bid-opportunity',

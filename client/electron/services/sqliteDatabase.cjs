@@ -3,12 +3,13 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 const { getWorkspaceDatabasePath } = require('../utils/paths.cjs');
 
-const schemaVersion = 8;
+const schemaVersion = 11;
 
 function createInitialSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS technical_plan_meta (
       id INTEGER PRIMARY KEY CHECK (id = 1),
+      workflow_kind TEXT NOT NULL DEFAULT 'technical-plan',
       step TEXT NOT NULL DEFAULT 'document-analysis',
       tender_file_name TEXT,
       tender_markdown_path TEXT,
@@ -16,6 +17,12 @@ function createInitialSchema(db) {
       tender_markdown_chars INTEGER NOT NULL DEFAULT 0,
       tender_parser_label TEXT,
       tender_imported_at TEXT,
+      original_plan_file_name TEXT,
+      original_plan_markdown_path TEXT,
+      original_plan_markdown_hash TEXT,
+      original_plan_markdown_chars INTEGER NOT NULL DEFAULT 0,
+      original_plan_parser_label TEXT,
+      original_plan_imported_at TEXT,
       pending_tender_markdown_path TEXT,
       pending_tender_file_name TEXT,
       pending_tender_parser_label TEXT,
@@ -23,6 +30,7 @@ function createInitialSchema(db) {
       pending_tender_total_declared INTEGER,
       pending_tender_created_at TEXT,
       bid_analysis_mode TEXT NOT NULL DEFAULT 'key',
+      bid_analysis_selected_task_ids_json TEXT,
       outline_mode TEXT NOT NULL DEFAULT 'aligned',
       outline_project_name TEXT,
       outline_project_overview TEXT,
@@ -178,6 +186,47 @@ function addTechnicalPlanPendingTenderSelection(db) {
   addIfMissing('pending_tender_sections_json', 'TEXT');
   addIfMissing('pending_tender_total_declared', 'INTEGER');
   addIfMissing('pending_tender_created_at', 'TEXT');
+}
+
+function addTechnicalPlanWorkflowAndOriginalPlan(db) {
+  const cols = db.prepare("PRAGMA table_info(technical_plan_meta)").all().map((row) => row.name);
+  const addIfMissing = (name, type) => {
+    if (!cols.includes(name)) {
+      db.exec(`ALTER TABLE technical_plan_meta ADD COLUMN ${name} ${type}`);
+    }
+  };
+  addIfMissing('workflow_kind', "TEXT NOT NULL DEFAULT 'technical-plan'");
+  addIfMissing('original_plan_file_name', 'TEXT');
+  addIfMissing('original_plan_markdown_path', 'TEXT');
+  addIfMissing('original_plan_markdown_hash', 'TEXT');
+  addIfMissing('original_plan_markdown_chars', 'INTEGER NOT NULL DEFAULT 0');
+  addIfMissing('original_plan_parser_label', 'TEXT');
+  addIfMissing('original_plan_imported_at', 'TEXT');
+}
+
+function addTechnicalPlanBidAnalysisSelection(db) {
+  const cols = db.prepare("PRAGMA table_info(technical_plan_meta)").all().map((row) => row.name);
+  if (!cols.includes('bid_analysis_selected_task_ids_json')) {
+    db.exec('ALTER TABLE technical_plan_meta ADD COLUMN bid_analysis_selected_task_ids_json TEXT');
+  }
+}
+
+function addKnowledgeDocumentSortOrder(db) {
+  const cols = db.prepare("PRAGMA table_info(knowledge_documents)").all().map((row) => row.name);
+  if (!cols.includes('sort_order')) {
+    db.exec('ALTER TABLE knowledge_documents ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
+    const folders = db.prepare('SELECT DISTINCT folder_id FROM knowledge_documents').all();
+    const documentsByFolder = db.prepare('SELECT document_id FROM knowledge_documents WHERE folder_id = ? ORDER BY created_at DESC, document_id ASC');
+    const updateOrder = db.prepare('UPDATE knowledge_documents SET sort_order = ? WHERE document_id = ?');
+    for (const folder of folders) {
+      documentsByFolder.all(folder.folder_id).forEach((document, index) => updateOrder.run(index, document.document_id));
+    }
+  }
+  db.exec(`
+    DROP INDEX IF EXISTS idx_knowledge_documents_folder_order;
+    CREATE INDEX IF NOT EXISTS idx_knowledge_documents_folder_order
+    ON knowledge_documents(folder_id, sort_order, created_at DESC);
+  `);
 }
 
 function createDuplicateCheckSchema(db) {
@@ -551,13 +600,14 @@ function createKnowledgeBaseSchema(db) {
       system_discarded_after_retry_count INTEGER NOT NULL DEFAULT 0,
       last_batch_size INTEGER,
       parser_label TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (folder_id) REFERENCES knowledge_folders(folder_id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_knowledge_documents_folder_order
-    ON knowledge_documents(folder_id, created_at DESC);
+    ON knowledge_documents(folder_id, sort_order, created_at DESC);
 
     CREATE INDEX IF NOT EXISTS idx_knowledge_documents_status
     ON knowledge_documents(status);
@@ -668,7 +718,250 @@ function createKnowledgeBaseSchema(db) {
       created_at TEXT NOT NULL,
       FOREIGN KEY (document_id) REFERENCES knowledge_documents(document_id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS knowledge_document_steps (
+      document_id TEXT NOT NULL,
+      step_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'idle',
+      result_json TEXT,
+      error TEXT,
+      started_at TEXT,
+      completed_at TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (document_id, step_key),
+      FOREIGN KEY (document_id) REFERENCES knowledge_documents(document_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_knowledge_document_steps_status
+    ON knowledge_document_steps(document_id, status);
+
+    CREATE TABLE IF NOT EXISTS knowledge_match_batches (
+      document_id TEXT NOT NULL,
+      batch_index INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'idle',
+      item_ids_json TEXT NOT NULL DEFAULT '[]',
+      matches_json TEXT,
+      error TEXT,
+      started_at TEXT,
+      completed_at TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (document_id, batch_index),
+      FOREIGN KEY (document_id) REFERENCES knowledge_documents(document_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_knowledge_match_batches_status
+    ON knowledge_match_batches(document_id, status, batch_index);
   `);
+}
+
+const schemaHealthTableGroups = [
+  {
+    version: 1,
+    tables: [
+      'technical_plan_meta',
+      'technical_plan_tasks',
+      'technical_plan_bid_items',
+      'technical_plan_reference_docs',
+      'technical_plan_outline_nodes',
+      'technical_plan_content_sections',
+      'technical_plan_content_plans',
+    ],
+    repair: createInitialSchema,
+  },
+  {
+    version: 2,
+    tables: [
+      'duplicate_check_meta',
+      'duplicate_check_files',
+      'duplicate_check_tasks',
+      'duplicate_check_analysis_sections',
+      'duplicate_check_content_files',
+      'duplicate_check_metadata_items',
+      'duplicate_check_outline_items',
+      'duplicate_check_outline_groups',
+      'duplicate_check_outline_pairwise',
+      'duplicate_check_content_duplicates',
+      'duplicate_check_content_occurrences',
+      'duplicate_check_image_files',
+      'duplicate_check_duplicate_images',
+      'duplicate_check_image_occurrences',
+    ],
+    repair: createDuplicateCheckSchema,
+  },
+  {
+    version: 2,
+    tables: [
+      'rejection_check_meta',
+      'rejection_check_documents',
+      'rejection_check_tasks',
+      'rejection_check_extraction',
+      'rejection_check_results',
+      'rejection_check_risk_findings',
+      'rejection_check_typo_findings',
+      'rejection_check_logic_findings',
+    ],
+    repair: createRejectionCheckSchema,
+  },
+  {
+    version: 3,
+    tables: [
+      'knowledge_migration_meta',
+      'knowledge_folders',
+      'knowledge_documents',
+      'knowledge_blocks',
+      'knowledge_candidate_items',
+      'knowledge_items',
+      'knowledge_item_blocks',
+      'knowledge_discarded_groups',
+      'knowledge_reports',
+      'knowledge_document_steps',
+      'knowledge_match_batches',
+    ],
+    repair: createKnowledgeBaseSchema,
+  },
+  {
+    version: 4,
+    tables: ['technical_plan_global_fact_groups'],
+    repair: createTechnicalPlanGlobalFactsSchema,
+  },
+];
+
+const schemaHealthColumnGroups = [
+  {
+    version: 1,
+    table: 'technical_plan_meta',
+    columns: {
+      step: 'TEXT',
+      tender_file_name: 'TEXT',
+      tender_markdown_path: 'TEXT',
+      tender_markdown_hash: 'TEXT',
+      tender_markdown_chars: 'INTEGER',
+      tender_parser_label: 'TEXT',
+      tender_imported_at: 'TEXT',
+      bid_analysis_mode: 'TEXT',
+      outline_mode: 'TEXT',
+      outline_project_name: 'TEXT',
+      outline_project_overview: 'TEXT',
+      content_generation_options_json: 'TEXT',
+      content_generation_runtime_json: 'TEXT',
+      created_at: 'TEXT',
+      updated_at: 'TEXT',
+    },
+  },
+  {
+    version: 5,
+    table: 'technical_plan_meta',
+    columns: {
+      current_bid_section_id: 'TEXT',
+      bid_sections_extracted: 'INTEGER',
+    },
+  },
+  {
+    version: 7,
+    table: 'technical_plan_meta',
+    columns: {
+      selected_section_id: 'TEXT',
+      selected_section_title: 'TEXT',
+      selected_section_head_line: 'TEXT',
+    },
+  },
+  {
+    version: 8,
+    table: 'technical_plan_meta',
+    columns: {
+      pending_tender_markdown_path: 'TEXT',
+      pending_tender_file_name: 'TEXT',
+      pending_tender_parser_label: 'TEXT',
+      pending_tender_sections_json: 'TEXT',
+      pending_tender_total_declared: 'INTEGER',
+      pending_tender_created_at: 'TEXT',
+    },
+  },
+  {
+    version: 9,
+    table: 'technical_plan_meta',
+    columns: {
+      workflow_kind: "TEXT NOT NULL DEFAULT 'technical-plan'",
+      original_plan_file_name: 'TEXT',
+      original_plan_markdown_path: 'TEXT',
+      original_plan_markdown_hash: 'TEXT',
+      original_plan_markdown_chars: 'INTEGER NOT NULL DEFAULT 0',
+      original_plan_parser_label: 'TEXT',
+      original_plan_imported_at: 'TEXT',
+    },
+  },
+  {
+    version: 10,
+    table: 'technical_plan_meta',
+    columns: {
+      bid_analysis_selected_task_ids_json: 'TEXT',
+    },
+  },
+  {
+    version: 11,
+    table: 'knowledge_documents',
+    columns: {
+      sort_order: 'INTEGER NOT NULL DEFAULT 0',
+    },
+  },
+];
+
+function quoteIdentifier(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+function getExistingTables(db) {
+  return new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+}
+
+function getExistingColumns(db, tableName) {
+  return new Set(db.prepare(`PRAGMA table_info(${quoteIdentifier(tableName)})`).all().map((row) => row.name));
+}
+
+function emitDatabaseStatus(onStatus, status) {
+  if (typeof onStatus === 'function') {
+    onStatus(status);
+  }
+}
+
+function ensureWorkspaceSchemaHealth(db, targetVersion = schemaVersion, onStatus) {
+  emitDatabaseStatus(onStatus, {
+    phase: 'checking',
+    message: '正在检查本地数据库结构',
+    targetVersion,
+  });
+  let existingTables = getExistingTables(db);
+  for (const group of schemaHealthTableGroups) {
+    if (group.version > targetVersion) continue;
+    if (group.tables.every((tableName) => existingTables.has(tableName))) continue;
+    emitDatabaseStatus(onStatus, {
+      phase: 'repairing',
+      message: '正在修复本地数据库表结构',
+      targetVersion,
+    });
+    group.repair(db);
+    existingTables = getExistingTables(db);
+  }
+
+  const columnCache = new Map();
+  for (const group of schemaHealthColumnGroups) {
+    if (group.version > targetVersion || !existingTables.has(group.table)) continue;
+    let existingColumns = columnCache.get(group.table);
+    if (!existingColumns) {
+      existingColumns = getExistingColumns(db, group.table);
+      columnCache.set(group.table, existingColumns);
+    }
+    for (const [columnName, columnType] of Object.entries(group.columns)) {
+      if (existingColumns.has(columnName)) continue;
+      emitDatabaseStatus(onStatus, {
+        phase: 'repairing',
+        message: '正在修复本地数据库字段',
+        targetVersion,
+      });
+      db.exec(`ALTER TABLE ${quoteIdentifier(group.table)} ADD COLUMN ${quoteIdentifier(columnName)} ${columnType}`);
+      existingColumns.add(columnName);
+    }
+  }
 }
 
 const migrations = [
@@ -712,6 +1005,21 @@ const migrations = [
     description: '技术方案新增待选择标段恢复状态',
     up: addTechnicalPlanPendingTenderSelection,
   },
+  {
+    version: 9,
+    description: '技术方案新增工作流类型和原方案文件状态',
+    up: addTechnicalPlanWorkflowAndOriginalPlan,
+  },
+  {
+    version: 10,
+    description: '技术方案新增招标解析项选择配置',
+    up: addTechnicalPlanBidAnalysisSelection,
+  },
+  {
+    version: 11,
+    description: '知识库文档新增手动排序字段',
+    up: addKnowledgeDocumentSortOrder,
+  },
 ];
 
 function timestampForFileName() {
@@ -724,11 +1032,15 @@ function copyIfExists(source, target) {
   }
 }
 
-function backupDatabaseFiles(db, databasePath) {
+function backupDatabaseFiles(db, databasePath, onStatus) {
   if (!fs.existsSync(databasePath)) {
     return;
   }
 
+  emitDatabaseStatus(onStatus, {
+    phase: 'backing-up',
+    message: '正在备份本地数据库',
+  });
   db.pragma('wal_checkpoint(TRUNCATE)');
   const suffix = `backup-${timestampForFileName()}`;
   copyIfExists(databasePath, `${databasePath}.${suffix}`);
@@ -736,17 +1048,18 @@ function backupDatabaseFiles(db, databasePath) {
   copyIfExists(`${databasePath}-shm`, `${databasePath}-shm.${suffix}`);
 }
 
-function applyMigrations(db, databasePath) {
+function applyMigrations(db, databasePath, onStatus) {
   const currentVersion = Number(db.pragma('user_version', { simple: true }) || 0);
   if (currentVersion > schemaVersion) {
     throw new Error(`本地数据库版本 ${currentVersion} 高于当前客户端支持版本 ${schemaVersion}，请升级客户端后再使用技术方案功能。`);
   }
   if (currentVersion === schemaVersion) {
+    ensureWorkspaceSchemaHealth(db, schemaVersion, onStatus);
     return;
   }
 
   if (currentVersion > 0) {
-    backupDatabaseFiles(db, databasePath);
+    backupDatabaseFiles(db, databasePath, onStatus);
   }
 
   const runMigration = db.transaction((migration) => {
@@ -756,14 +1069,26 @@ function applyMigrations(db, databasePath) {
 
   for (const migration of migrations.filter((item) => item.version > currentVersion).sort((a, b) => a.version - b.version)) {
     try {
+      ensureWorkspaceSchemaHealth(db, migration.version - 1, onStatus);
+      emitDatabaseStatus(onStatus, {
+        phase: 'upgrading',
+        message: `正在升级本地数据库（v${migration.version}）`,
+        currentVersion,
+        targetVersion: migration.version,
+        migrationVersion: migration.version,
+        migrationDescription: migration.description,
+      });
       runMigration(migration);
+      ensureWorkspaceSchemaHealth(db, migration.version, onStatus);
     } catch (error) {
       throw new Error(`数据库升级失败（v${migration.version} ${migration.description}）：${error.message || String(error)}`);
     }
   }
+
+  ensureWorkspaceSchemaHealth(db, schemaVersion, onStatus);
 }
 
-function createSqliteDatabase(app) {
+function createSqliteDatabase(app, options = {}) {
   const databasePath = getWorkspaceDatabasePath(app);
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
   const db = new Database(databasePath);
@@ -771,7 +1096,7 @@ function createSqliteDatabase(app) {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
-  applyMigrations(db, databasePath);
+  applyMigrations(db, databasePath, options.onStatus);
 
   const close = () => {
     if (db.open) {

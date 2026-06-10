@@ -4,7 +4,7 @@
 -- 1. 本文件用于开源开发者阅读、评审和排查问题，展示 workspace/yibiao.sqlite 的目标完整表结构。
 -- 2. 用户运行客户端时不需要手动执行本文件。
 -- 3. 客户端运行时建表和升级以 Electron Main 侧 migration 代码为准。
--- 4. 当前运行代码已落地 technical_plan_* v1、duplicate_check_* / rejection_check_* v2、knowledge_* v3、technical_plan_global_fact_groups v4、标段兼容 v5/v6、标段选择 v7 和待选择标段恢复状态 v8 目标结构。
+-- 4. 当前运行代码已落地 technical_plan_* v1、duplicate_check_* / rejection_check_* v2、knowledge_* v3、technical_plan_global_fact_groups v4、标段兼容 v5/v6、标段选择 v7、待选择标段恢复状态 v8、工作流类型和原方案文件状态 v9、招标解析项选择配置 v10 目标结构。
 -- 5. 每次表结构调整后，需要同步更新本文件和 runtime migration 版本。
 -- 6. 本文件不保存历史版本，每次更新都写入最新目标完整结构。
 
@@ -14,18 +14,21 @@ PRAGMA busy_timeout = 5000;
 
 -- 目标完整结构版本。
 -- 运行时代码应通过 PRAGMA user_version 判断是否需要自动升级。
-PRAGMA user_version = 8;
+PRAGMA user_version = 10;
 
 -- ============================================================================
 -- 技术方案 technical_plan_*（v1 已落地）
 -- ============================================================================
 
 -- 技术方案单例元数据。
--- 只保留一行 id = 1，用于保存当前步骤、招标文件 Markdown 元数据、Step 内 pending 子状态、模式配置和正文生成运行时 JSON。
+-- 只保留一行 id = 1，用于保存当前步骤、工作流类型、招标文件/原方案 Markdown 元数据、Step 内 pending 子状态、模式配置和正文生成运行时 JSON。
 -- 招标文件 Markdown 原文不进入 SQLite，保存到 userData/workspace/technical-plan/tender.md。
+-- 原方案 Markdown 原文不进入 SQLite，保存到 userData/workspace/technical-plan/original-plan.md。
 -- 多标段待选择 Markdown 原文同样不进入 SQLite，保存到 userData/workspace/technical-plan/tender-pending-*.tmp.md，并由 pending_tender_* 字段记录恢复状态。
 CREATE TABLE IF NOT EXISTS technical_plan_meta (
   id INTEGER PRIMARY KEY CHECK (id = 1),
+  -- v9 工作流类型：technical-plan / existing-plan-expansion
+  workflow_kind TEXT NOT NULL DEFAULT 'technical-plan',
   step TEXT NOT NULL DEFAULT 'document-analysis',
   tender_file_name TEXT,
   tender_markdown_path TEXT,
@@ -33,6 +36,13 @@ CREATE TABLE IF NOT EXISTS technical_plan_meta (
   tender_markdown_chars INTEGER NOT NULL DEFAULT 0,
   tender_parser_label TEXT,
   tender_imported_at TEXT,
+  -- v9 已有方案扩写的原方案文件状态
+  original_plan_file_name TEXT,
+  original_plan_markdown_path TEXT,
+  original_plan_markdown_hash TEXT,
+  original_plan_markdown_chars INTEGER NOT NULL DEFAULT 0,
+  original_plan_parser_label TEXT,
+  original_plan_imported_at TEXT,
   -- v8 Step01 多标段待选择恢复状态
   pending_tender_markdown_path TEXT,
   pending_tender_file_name TEXT,
@@ -41,6 +51,8 @@ CREATE TABLE IF NOT EXISTS technical_plan_meta (
   pending_tender_total_declared INTEGER,
   pending_tender_created_at TEXT,
   bid_analysis_mode TEXT NOT NULL DEFAULT 'key',
+  -- v10 招标解析项选择配置，JSON 数组，关键项由运行时代码强制并入。
+  bid_analysis_selected_task_ids_json TEXT,
   outline_mode TEXT NOT NULL DEFAULT 'aligned',
   outline_project_name TEXT,
   outline_project_overview TEXT,
@@ -556,13 +568,14 @@ CREATE TABLE IF NOT EXISTS knowledge_documents (
   system_discarded_after_retry_count INTEGER NOT NULL DEFAULT 0,
   last_batch_size INTEGER,
   parser_label TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (folder_id) REFERENCES knowledge_folders(folder_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_documents_folder_order
-ON knowledge_documents(folder_id, created_at DESC);
+ON knowledge_documents(folder_id, sort_order, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_documents_status
 ON knowledge_documents(status);
@@ -683,3 +696,38 @@ CREATE TABLE IF NOT EXISTS knowledge_reports (
   created_at TEXT NOT NULL,
   FOREIGN KEY (document_id) REFERENCES knowledge_documents(document_id) ON DELETE CASCADE
 );
+
+-- 知识库文档处理步骤状态，用于失败后从可信断点重试。
+CREATE TABLE IF NOT EXISTS knowledge_document_steps (
+  document_id TEXT NOT NULL,
+  step_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'idle',
+  result_json TEXT,
+  error TEXT,
+  started_at TEXT,
+  completed_at TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (document_id, step_key),
+  FOREIGN KEY (document_id) REFERENCES knowledge_documents(document_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_document_steps_status
+ON knowledge_document_steps(document_id, status);
+
+-- 知识库段落匹配批次状态，用于只重试失败或缺失的批次。
+CREATE TABLE IF NOT EXISTS knowledge_match_batches (
+  document_id TEXT NOT NULL,
+  batch_index INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'idle',
+  item_ids_json TEXT NOT NULL DEFAULT '[]',
+  matches_json TEXT,
+  error TEXT,
+  started_at TEXT,
+  completed_at TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (document_id, batch_index),
+  FOREIGN KEY (document_id) REFERENCES knowledge_documents(document_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_match_batches_status
+ON knowledge_match_batches(document_id, status, batch_index);

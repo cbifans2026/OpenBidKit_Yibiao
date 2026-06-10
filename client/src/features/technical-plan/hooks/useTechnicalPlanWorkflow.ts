@@ -3,11 +3,14 @@ import { technicalPlanStorage } from '../services/technicalPlanStorage';
 import type { TechnicalPlanState } from '../types';
 
 const initialState: TechnicalPlanState = {
+  workflowKind: 'technical-plan',
   step: 'document-analysis',
   tenderFile: null,
+  originalPlanFile: null,
   projectOverview: '',
   techRequirements: '',
   bidAnalysisMode: 'key',
+  bidAnalysisSelectedTaskIds: [],
   bidAnalysisTasks: {},
   bidAnalysisProgress: 0,
   outlineMode: 'aligned',

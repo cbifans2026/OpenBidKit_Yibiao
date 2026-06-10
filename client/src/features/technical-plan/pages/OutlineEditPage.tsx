@@ -6,6 +6,9 @@ import { useToast } from '../../../shared/ui';
 import type { BackgroundTaskState, SaveOutlineRequest } from '../types';
 import type { KnowledgeBaseIndex, KnowledgeDocument } from '../../knowledge-base/types';
 import type { OutlineData, OutlineItem, OutlineMode } from '../../../shared/types';
+import type { ExportFormatConfig } from '../../../shared/types/exportFormat';
+import { DEFAULT_EXPORT_FORMAT } from '../../../shared/types/exportFormat';
+import { formatOutlineTitle } from '../../../shared/utils/outlineNumbering';
 
 interface OutlineEditPageProps {
   projectOverview: string;
@@ -231,6 +234,7 @@ function OutlineEditPage({
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [sorting, setSorting] = useState(false);
   const [draftOutlineData, setDraftOutlineData] = useState<OutlineData | null>(null);
+  const [exportFormat, setExportFormat] = useState<ExportFormatConfig>(DEFAULT_EXPORT_FORMAT);
   const [sortDirty, setSortDirty] = useState(false);
   const [savingSort, setSavingSort] = useState(false);
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
@@ -262,6 +266,16 @@ function OutlineEditPage({
   const effectiveStartedAt = Number.isFinite(startedAt) ? startedAt : localStartAt;
   const elapsedText = generating && effectiveStartedAt ? `已运行 ${formatDuration(nowTick - effectiveStartedAt)}` : '';
   const staleText = generating && Number.isFinite(updatedAt) ? `最近更新 ${Math.floor(Math.max(0, nowTick - updatedAt) / 1000)} 秒前` : '';
+
+  useEffect(() => {
+    let cancelled = false;
+    window.yibiao?.config.load().then((cfg) => {
+      if (!cancelled && cfg?.export_format) {
+        setExportFormat(cfg.export_format);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (activeOutlineData?.outline?.length) {
@@ -398,15 +412,7 @@ function OutlineEditPage({
   };
 
   const toggleKnowledgeFolder = (folderId: string) => {
-    setExpandedKnowledgeFolderIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(folderId)) {
-        next.delete(folderId);
-      } else {
-        next.add(folderId);
-      }
-      return next;
-    });
+    setExpandedKnowledgeFolderIds((prev) => (prev.has(folderId) ? new Set() : new Set([folderId])));
   };
 
   const selectFolderDocuments = (documents: KnowledgeDocument[]) => {
@@ -748,7 +754,7 @@ function OutlineEditPage({
             onClick={() => setSelectedItemId(item.id)}
             onDoubleClick={() => hasChildren && toggleExpanded(item.id)}
           >
-            <strong>{item.id} {item.title}</strong>
+            <strong>{formatOutlineTitle(item.id, item.title, exportFormat.headings[Math.min(item.id.split('.').length - 1, 5)].numbering_format)}</strong>
             <small>{item.description || '无描述'}</small>
           </button>
         </div>
@@ -776,6 +782,7 @@ function OutlineEditPage({
 
       return documents.length ? [{ folder, documents }] : [];
     });
+    const visibleDocumentCount = visibleFolders.reduce((total, group) => total + group.documents.length, 0);
 
     if (!availableDocuments.length) {
       return <div className="outline-knowledge-empty">暂无已完成的知识库文档，可先到知识库上传并处理完成后再选择。</div>;
@@ -783,17 +790,20 @@ function OutlineEditPage({
 
     return (
       <div className="outline-knowledge-compact">
-        <input
-          className="outline-knowledge-search"
-          value={knowledgeSearch}
-          onChange={(event) => setKnowledgeSearch(event.target.value)}
-          placeholder="搜索文件夹或文档"
-        />
+        <div className="outline-knowledge-search-row">
+          <input
+            className="outline-knowledge-search"
+            value={knowledgeSearch}
+            onChange={(event) => setKnowledgeSearch(event.target.value)}
+            placeholder="搜索文件夹或文档"
+          />
+          <span>{keyword ? `匹配 ${visibleDocumentCount} 个文档` : `共 ${availableDocuments.length} 个可用文档`}</span>
+        </div>
         <div className="outline-knowledge-grid">
           <div className="outline-knowledge-browser">
             <div className="outline-knowledge-pane-head">
               <strong>知识库</strong>
-              <span>{availableDocuments.length} 个可用</span>
+              <span>{visibleFolders.length} 个文件夹</span>
             </div>
             <div className="outline-knowledge-folder-list compact">
               {visibleFolders.length ? visibleFolders.map(({ folder, documents }) => {
@@ -803,7 +813,7 @@ function OutlineEditPage({
                 return (
                   <section className="outline-knowledge-folder compact" key={folder.id}>
                     <div className="outline-knowledge-folder-head compact">
-                      <button type="button" onClick={() => toggleKnowledgeFolder(folder.id)} disabled={Boolean(keyword)}>
+                      <button type="button" onClick={() => toggleKnowledgeFolder(folder.id)} disabled={Boolean(keyword)} aria-expanded={expanded}>
                         <span>{expanded ? '▾' : '▸'}</span>
                         <strong>{folder.name}</strong>
                       </button>

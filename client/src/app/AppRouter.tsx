@@ -4,6 +4,7 @@ import BidOpportunityPage from '../features/bid-opportunity/pages/BidOpportunity
 import BusinessBidPage from '../features/business-bid/pages/BusinessBidPage';
 import DeveloperDemoPage, { isDeveloperDemoSection } from '../features/developer/pages/DeveloperDemoPage';
 import DeveloperTestPage from '../features/developer/pages/DeveloperTestPage';
+import ExportFormatPage from '../features/export-format/pages/ExportFormatPage';
 import DuplicateCheckPage from '../features/duplicate-check/pages/DuplicateCheckPage';
 import KnowledgeBasePage from '../features/knowledge-base/pages/KnowledgeBasePage';
 import RejectionCheckPage from '../features/rejection-check/pages/RejectionCheckPage';
@@ -33,10 +34,12 @@ function AppRouter({ activeSection, developerMode, onDeveloperModeChange, onSect
 
   switch (activeSection) {
     case 'technical-plan':
-      return <TechnicalPlanHome registerLeaveGuard={registerLeaveGuard} />;
+      return <TechnicalPlanHome workflowKind="technical-plan" registerLeaveGuard={registerLeaveGuard} onSectionChange={onSectionChange} />;
+    case 'existing-plan-expansion':
+      return <TechnicalPlanHome workflowKind="existing-plan-expansion" registerLeaveGuard={registerLeaveGuard} onSectionChange={onSectionChange} />;
     case 'business-bid':
       return <BusinessBidPage />;
-    case 'knowledge-base':
+    case 'document-knowledge-base':
       return <KnowledgeBasePage />;
     case 'resources':
       return <ResourcesPage />;
@@ -44,6 +47,8 @@ function AppRouter({ activeSection, developerMode, onDeveloperModeChange, onSect
       return <DuplicateCheckPage />;
     case 'rejection-check':
       return <RejectionCheckPage />;
+    case 'export-format':
+      return <ExportFormatPage />;
     case 'bid-opportunity':
       return <BidOpportunityPage />;
     case 'developer-test':

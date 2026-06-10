@@ -5,6 +5,55 @@ function formatSuggestions(suggestions) {
   return `\n\n本轮修正建议：\n${suggestions.map((item, index) => `${index + 1}. ${item}`).join('\n')}`;
 }
 
+function formatOldOutlineForPrompt(oldOutline) {
+  if (!oldOutline) return '';
+  return typeof oldOutline === 'string' ? oldOutline : JSON.stringify(oldOutline, null, 2);
+}
+
+function formatOutlineItemLabel(item, fallback = '未命名目录') {
+  const id = String(item?.id || '').trim();
+  const title = String(item?.title || '').trim() || fallback;
+  return id ? `${id} ${title}` : title;
+}
+
+function childrenOutlineJsonExample(parentId) {
+  const id = String(parentId || '1').trim() || '1';
+  return `{
+  "children": [
+    {
+      "id": "${id}.1",
+      "title": "二级目录标题",
+      "description": "二级目录说明",
+      "children": [
+        {
+          "id": "${id}.1.1",
+          "title": "三级目录标题",
+          "description": "三级目录说明"
+        },
+        {
+          "id": "${id}.1.2",
+          "title": "三级目录标题",
+          "description": "三级目录说明"
+        }
+      ]
+    }
+  ]
+}`;
+}
+
+function childrenOutlineStructureRules(parentId) {
+  const id = String(parentId || '1').trim() || '1';
+  return `结构要求：
+1. 顶层 children 只能放当前一级目录的直接子目录，也就是二级目录。
+2. 每个二级目录都必须包含非空 children 数组，children 内是三级目录。
+3. 不要把评分细项直接作为没有子节点的二级目录；应先归纳二级主题，再在其下展开三级响应要点、实施措施、证明材料或验收标准。
+4. 三级目录只包含 id、title、description，不要继续包含 children。
+5. 编号必须以当前一级目录编号 ${id} 为前缀，例如二级 ${id}.1，三级 ${id}.1.1。
+
+返回示例：
+${childrenOutlineJsonExample(id)}`;
+}
+
 const KNOWLEDGE_RESUME_MAX_CHARS = 220;
 const MAX_KNOWLEDGE_ADDITIONS = 30;
 
@@ -145,7 +194,62 @@ JSON 格式要求：
 }`;
 }
 
-function generateOutlineMessages({ overview, requirements, suggestions }) {
+function readExpandOutlinePrompt() {
+  return `你是一个专业的标书编写专家。请严格基于用户提交的标书技术方案原文完成目录提取任务。
+
+要求：
+1. 目录结构要全面覆盖技术标的所有必要目录，包含多级目录
+2. 如果技术方案中有章节名称，则直接使用技术方案中的章节名称
+3. 如果技术方案中没有章节名称，则结合全文，总结出章节名称
+4. 返回标准 JSON 格式，包含章节编号、标题、描述和子章节，注意编号要连贯
+5. 除了 JSON 结果外，不要输出任何其他内容
+
+JSON 格式要求：
+{
+  "outline": [
+    {
+      "id": "1",
+      "title": "",
+      "description": "",
+      "children": [
+        {
+          "id": "1.1",
+          "title": "",
+          "description": "",
+          "children": [
+            {
+              "id": "1.1.1",
+              "title": "",
+              "description": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}`;
+}
+
+function buildExpandOutlineMessages(fileContent) {
+  return [
+    { role: 'system', content: readExpandOutlinePrompt() },
+    { role: 'user', content: `以下是完整技术方案全文，请先完整阅读，并仅基于原文完成后续任务：\n\n${fileContent}` },
+    { role: 'user', content: '请从上述技术方案中提取完整目录结构，确保覆盖技术标的所有必要目录，并按要求返回标准 JSON。' },
+  ];
+}
+
+function generateOutlineMessages({ overview, requirements, oldOutline, suggestions }) {
+  const formattedOldOutline = formatOldOutlineForPrompt(oldOutline);
+  if (formattedOldOutline) {
+    return [
+      { role: 'system', content: outlineSystemPrompt() },
+      { role: 'user', content: `项目概述：\n${overview}` },
+      { role: 'user', content: `技术评分要求：\n${requirements}` },
+      { role: 'user', content: `用户自己编写的目录：\n${formattedOldOutline}` },
+      { role: 'user', content: `请在满足技术评分要求的前提下，充分结合用户自己编写的目录，生成完整的技术标目录结构。${formatSuggestions(suggestions)}` },
+    ];
+  }
+
   return [
     { role: 'system', content: outlineSystemPrompt() },
     { role: 'user', content: `项目概述：\n${overview}` },
@@ -154,7 +258,18 @@ function generateOutlineMessages({ overview, requirements, suggestions }) {
   ];
 }
 
-function generateTopLevelOutlineMessages({ overview, requirements, suggestions }) {
+function generateTopLevelOutlineMessages({ overview, requirements, oldOutline, suggestions }) {
+  const formattedOldOutline = formatOldOutlineForPrompt(oldOutline);
+  if (formattedOldOutline) {
+    return [
+      { role: 'system', content: topLevelOutlineSystemPrompt() },
+      { role: 'user', content: `项目概述：\n${overview}` },
+      { role: 'user', content: `技术评分要求：\n${requirements}` },
+      { role: 'user', content: `用户自己编写的目录：\n${formattedOldOutline}` },
+      { role: 'user', content: `请在满足技术评分要求的前提下，充分结合用户自己编写的目录，仅生成一级目录，不要生成二级和三级目录。返回的 JSON 使用 outline 字段，每个一级目录都必须包含 id、title、description。${formatSuggestions(suggestions)}` },
+    ];
+  }
+
   return [
     { role: 'system', content: topLevelOutlineSystemPrompt() },
     { role: 'user', content: `项目概述：\n${overview}` },
@@ -193,22 +308,23 @@ JSON 格式要求：
   ];
 }
 
-function generateAlignedChildrenMessages({ overview, requirements, parentItem, group, suggestions }) {
+function generateAlignedChildrenMessages({ overview, requirements, parentItem, group, oldOutline, suggestions }) {
   const detailLines = (group.detail_points || [])
     .filter((item) => typeof item === 'string' && item.trim())
     .map((item) => `- ${item}`)
     .join('\n');
   const detailContent = detailLines || '- 未提供明确细项，请根据评分大类描述合理展开';
+  const formattedOldOutline = formatOldOutlineForPrompt(oldOutline);
   const systemPrompt = `你是一个专业的标书编写专家。请围绕指定的技术评分大类，为已经固定好的一级目录生成二级和三级目录。
 
 要求：
 1. 一级目录标题和顺序已经固定，不能修改、重命名、合并或删除一级目录
 2. 只输出当前一级目录下的二级和三级目录，不要重复输出一级目录本身
 3. 二级和三级目录要覆盖当前技术评分大类及其细项，不能越界写入其他评分大类内容
-4. 返回标准 JSON，格式为 {"children": [...]}，children 中只能包含当前一级目录的直接子目录
-5. 每个节点必须包含 id、title、description，三级目录继续使用 children 字段
-6. 章节编号必须以给定的一级目录编号为前缀，例如父级是 2，则二级目录编号从 2.1 开始，三级目录编号从 2.1.1 开始
-7. 除了 JSON 结果外，不要输出任何其他内容`;
+4. 返回标准 JSON，格式为 {"children": [...]}，每个节点必须包含 id、title、description
+5. 除了 JSON 结果外，不要输出任何其他内容
+
+${childrenOutlineStructureRules(parentItem.id)}`;
   const messages = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: `项目概述：\n${overview}` },
@@ -216,28 +332,78 @@ function generateAlignedChildrenMessages({ overview, requirements, parentItem, g
     { role: 'user', content: `当前固定一级目录：\n编号：${parentItem.id}\n标题：${parentItem.title}\n描述：${parentItem.description || ''}` },
     { role: 'user', content: `当前对应的技术评分大类：\nrequirement_id：${group.requirement_id}\n标题：${group.title}\n描述：${group.description}\n细项：\n${detailContent}` },
   ];
-  messages.push({ role: 'user', content: `请仅生成该一级目录下的二级、三级目录，一级目录标题必须保持为当前给定标题，返回格式必须是 {"children": [...]}。${formatSuggestions(suggestions)}` });
+  if (formattedOldOutline) {
+    messages.push({ role: 'user', content: `用户自己编写的目录参考：\n${formattedOldOutline}` });
+    messages.push({ role: 'user', content: `请在覆盖当前技术评分大类细项的前提下，参考用户目录优化当前一级目录下的二级、三级目录；每个二级目录必须包含三级目录，不得修改当前一级目录标题，返回格式必须是 {"children": [...]}。${formatSuggestions(suggestions)}` });
+  } else {
+    messages.push({ role: 'user', content: `请仅生成该一级目录下的二级、三级目录；每个二级目录必须包含三级目录，一级目录标题必须保持为当前给定标题，返回格式必须是 {"children": [...]}。${formatSuggestions(suggestions)}` });
+  }
   return messages;
 }
 
-function generateChildrenMessages({ overview, requirements, parentItem, suggestions }) {
+function generateChildrenMessages({ overview, requirements, parentItem, oldOutline, suggestions }) {
+  const formattedOldOutline = formatOldOutlineForPrompt(oldOutline);
   const systemPrompt = `你是一个专业的标书编写专家。请围绕指定的一级目录，生成其下属的二级目录和三级目录。
 
 要求：
 1. 只输出当前一级目录下的二级和三级目录，不要重复输出一级目录本身
-2. 返回标准 JSON，格式为 {"children": [...]} 
-3. children 中只能包含当前一级目录的直接子目录，每个节点必须包含 id、title、description
-4. 二级目录下如有三级目录，同样使用 children 字段
-5. 章节编号必须以给定的一级目录编号为前缀，例如父级是 2，则二级目录编号从 2.1 开始，三级目录编号从 2.1.1 开始
-6. 除了 JSON 结果外，不要输出任何其他内容`;
+2. 返回标准 JSON，格式为 {"children": [...]}，每个节点必须包含 id、title、description
+3. 除了 JSON 结果外，不要输出任何其他内容
+
+${childrenOutlineStructureRules(parentItem.id)}`;
   const messages = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: `项目概述：\n${overview}` },
     { role: 'user', content: `技术评分要求：\n${requirements}` },
     { role: 'user', content: `当前一级目录：\n编号：${parentItem.id}\n标题：${parentItem.title}\n描述：${parentItem.description || ''}` },
   ];
-  messages.push({ role: 'user', content: `请仅生成该一级目录下的二级、三级目录，返回格式必须是 {"children": [...]}。${formatSuggestions(suggestions)}` });
+  if (formattedOldOutline) {
+    messages.push({ role: 'user', content: `用户自己编写的目录：\n${formattedOldOutline}` });
+    messages.push({ role: 'user', content: `请在满足技术评分要求的前提下，充分结合用户自己编写的目录，仅生成该一级目录下的二级、三级目录；每个二级目录必须包含三级目录，返回格式必须是 {"children": [...]}。${formatSuggestions(suggestions)}` });
+  } else {
+    messages.push({ role: 'user', content: `请仅生成该一级目录下的二级、三级目录；每个二级目录必须包含三级目录，返回格式必须是 {"children": [...]}。${formatSuggestions(suggestions)}` });
+  }
   return messages;
+}
+
+function generateChildrenStructureRepairMessages({ invalidContent, issues }, parentItem, group) {
+  const detailLines = (group?.detail_points || [])
+    .filter((item) => typeof item === 'string' && item.trim())
+    .map((item) => `- ${item}`)
+    .join('\n');
+  const groupBlock = group ? `
+当前对应的技术评分大类：
+requirement_id：${group.requirement_id || ''}
+标题：${group.title || ''}
+描述：${group.description || ''}
+细项：
+${detailLines || '- 未提供明确细项'}` : '';
+  return [
+    {
+      role: 'user',
+      content: `你是一个严格的 JSON 修复器。请把模型输出修复为“当前一级目录下的二级和三级目录”JSON。
+
+必须满足：
+1. 顶层只能有 children 数组，不要输出一级目录本身
+2. 顶层 children 是二级目录，每个二级目录都必须包含非空 children 数组
+3. 二级目录的 children 内是三级目录，三级目录只包含 id、title、description，不要继续包含 children
+4. 优先保留原结果中的二级目录标题、说明和顺序，只在每个二级目录下补齐合理三级目录
+5. 不要把评分细项直接作为没有子节点的二级目录
+6. 只返回 JSON，不要输出解释文字
+
+${childrenOutlineStructureRules(parentItem?.id)}`,
+    },
+    { role: 'user', content: `当前一级目录：
+编号：${parentItem?.id || ''}
+标题：${parentItem?.title || ''}
+描述：${parentItem?.description || ''}${groupBlock}` },
+    { role: 'user', content: `错误列表：
+${(issues || []).map((item, index) => `${index + 1}. ${item}`).join('\n')}` },
+    { role: 'user', content: `待修复内容：
+\`\`\`json
+${String(invalidContent || '').slice(0, 60000)}
+\`\`\`` },
+  ];
 }
 
 function reviewOutlineMessages({ overview, requirements, outline }) {
@@ -612,10 +778,20 @@ function outlineDepth(items) {
   return items?.length ? 1 + Math.max(...items.map((item) => outlineDepth(item.children || []))) : 0;
 }
 
+function formatMissingOutlineLabels(items, limit = 8) {
+  const labels = (items || []).map((item, index) => formatOutlineItemLabel(item, `第 ${index + 1} 个目录`));
+  const visible = labels.slice(0, limit).join('、');
+  return labels.length > limit ? `${visible} 等 ${labels.length} 个目录` : visible;
+}
+
 function validateCompleteOutline(payload) {
   const outline = payload.outline || [];
   if (!outline.length) throw new Error('目录不能为空');
   if (outlineDepth(outline) < 3) throw new Error('完整目录至少需要三级结构');
+  const shallowItems = outline.filter((item) => outlineDepth([item]) < 3);
+  if (shallowItems.length) {
+    throw new Error(`完整目录至少需要三级结构，以下一级目录缺少三级目录：${formatMissingOutlineLabels(shallowItems)}`);
+  }
 }
 
 function validateTopLevelOutline(payload) {
@@ -623,7 +799,13 @@ function validateTopLevelOutline(payload) {
 }
 
 function validateChildrenOutline(payload) {
-  if (!(payload.children || []).length) throw new Error('二级目录不能为空');
+  const children = payload.children || [];
+  if (!children.length) throw new Error('二级目录不能为空');
+  const secondLevelWithoutThird = children.filter((item) => !(item.children || []).length);
+  if (secondLevelWithoutThird.length) {
+    throw new Error(`二级目录必须包含三级目录，缺失三级目录：${formatMissingOutlineLabels(secondLevelWithoutThird)}`);
+  }
+  if (outlineDepth(children) < 2) throw new Error('二级目录必须包含三级目录');
 }
 
 function validateRequirementGroups(payload) {
@@ -732,6 +914,21 @@ async function collectJson(aiService, options) {
   return aiService.collectJsonResponse ? aiService.collectJsonResponse(options) : aiService.requestJson(options);
 }
 
+async function extractOriginalOutline(aiService, originalPlanMarkdown, log) {
+  log('正在从原方案中提取旧目录。', 8);
+  const outline = await collectJson(aiService, {
+    messages: buildExpandOutlineMessages(originalPlanMarkdown),
+    temperature: 0.7,
+    normalizer: (value) => normalizeOutlineResponse(value, new Set()),
+    validator: validateTopLevelOutline,
+    progressCallback: (message) => log(message, 12),
+    progressLabel: '旧方案目录提取',
+    failureMessage: '模型返回的旧方案目录数据格式无效',
+  });
+  log('原方案旧目录提取完成。', 18);
+  return outline;
+}
+
 async function generateFull(aiService, payload, suggestions, log, progress = 20) {
   log('正在一次性生成完整目录。', progress);
   return collectJson(aiService, {
@@ -763,6 +960,7 @@ async function generateChildren(aiService, payload, parentItem, suggestions, log
     temperature: 0.7,
     normalizer: (value) => normalizeChildrenResponse(value, new Set()),
     validator: validateChildrenOutline,
+    repairMessagesBuilder: (context) => generateChildrenStructureRepairMessages(context, parentItem),
     progressCallback: (message) => log(message, progress),
     progressLabel: `章节 ${parentItem.title || '未命名章节'} 子目录`,
     failureMessage: '模型返回的目录数据格式无效',
@@ -875,6 +1073,7 @@ async function generateAlignedChildrenForGroup(aiService, payload, parentItem, g
     temperature: 0.7,
     normalizer: (value) => normalizeChildrenResponse(value, new Set()),
     validator: validateChildrenOutline,
+    repairMessagesBuilder: (context) => generateChildrenStructureRepairMessages(context, parentItem, group),
     progressCallback: (message) => log(message, progress),
     progressLabel: `章节 ${parentItem.title || '未命名章节'} 子目录`,
     failureMessage: '模型返回的目录数据格式无效',
@@ -1003,16 +1202,44 @@ async function runOutlineGenerationTask({ aiService, workspaceStore, knowledgeBa
   if (missingRequiredBidAnalysisLabels.length) {
     throw new Error(`请先完成关键招标文件解析项：${missingRequiredBidAnalysisLabels.join('、')}`);
   }
+  const isExpansionWorkflow = storedPlan.workflowKind === 'existing-plan-expansion';
   let technicalPlan = workspaceStore.updateTechnicalPlan({
     outlineMode: payload.mode,
     referenceKnowledgeDocumentIds,
     outlineGenerationTask: updateTask({ status: 'running', progress: 5, logs }),
   });
   updateTask({ status: 'running', progress: 5, logs }, technicalPlan);
+
+  let oldOutline = null;
+  if (isExpansionWorkflow) {
+    if (!storedPlan.originalPlanFile) {
+      throw new Error('请先上传原方案，再生成目录');
+    }
+    if (!workspaceStore.readOriginalPlanMarkdown) {
+      throw new Error('原方案读取服务尚未初始化');
+    }
+    const originalPlanMarkdown = workspaceStore.readOriginalPlanMarkdown();
+    if (!String(originalPlanMarkdown || '').trim()) {
+      throw new Error('请先上传原方案，再生成目录');
+    }
+    oldOutline = await extractOriginalOutline(aiService, originalPlanMarkdown, log);
+  }
+
+  technicalPlan = workspaceStore.updateTechnicalPlan({
+    outlineData: null,
+    contentGenerationTask: undefined,
+    contentGenerationSections: {},
+    contentGenerationPlans: {},
+    contentGenerationRuntime: undefined,
+    outlineGenerationTask: updateTask({ status: 'running', progress: currentProgress, logs }),
+  });
+  updateTask({ status: 'running', progress: currentProgress, logs }, technicalPlan);
+
   const taskPayload = {
     ...payload,
     overview,
     requirements,
+    oldOutline: formatOldOutlineForPrompt(oldOutline),
     reference_knowledge_document_ids: referenceKnowledgeDocumentIds,
   };
   let outline = taskPayload.mode === 'aligned' ? await alignedWorkflow(aiService, taskPayload, log) : await freeWorkflow(aiService, taskPayload, log);
