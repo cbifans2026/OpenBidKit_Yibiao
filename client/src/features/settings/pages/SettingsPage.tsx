@@ -3,7 +3,7 @@ import { trackConfigUsage } from '../../../shared/analytics/analytics';
 import { FloatingToolbar, InputWithAction, useToast } from '../../../shared/ui';
 import { showUpdateReadyToast } from '../../../shared/updateToast';
 import type { FloatingToolbarGroup } from '../../../shared/ui';
-import type { ClientConfig, FileParserProvider, ImageModelConfig, ImageModelProfiles, ImageModelProvider, ImageModelStatus, TextModelConfig, TextModelProfiles, TextModelProvider } from '../../../shared/types';
+import type { AiRequestMode, ClientConfig, FileParserProvider, ImageModelConfig, ImageModelProfiles, ImageModelProvider, ImageModelStatus, TextModelConfig, TextModelProfiles, TextModelProvider, UpdateChannel } from '../../../shared/types';
 import type { SettingsPageState } from '../types';
 
 type SettingsTab = 'general' | 'text-model' | 'image-model' | 'file-parser' | 'about';
@@ -17,6 +17,15 @@ const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
   { id: 'about', label: '关于' },
 ];
 
+const updateChannelOptions: Array<{ value: UpdateChannel; label: string; description: string }> = [
+  { value: 'github', label: 'GitHub', description: '使用 GitHub Release 检查和下载更新' },
+  { value: 'cloudflare', label: 'Cloudflare', description: '使用 Cloudflare R2 镜像检查和下载更新' },
+];
+
+function normalizeUpdateChannel(value?: string): UpdateChannel {
+  return value === 'cloudflare' ? 'cloudflare' : 'github';
+}
+
 const textModelProviders: Array<{ value: TextModelProvider; label: string }> = [
   { value: 'jinlong', label: '金龙中转站【推荐】' },
   { value: 'volcengine', label: '火山方舟' },
@@ -25,12 +34,17 @@ const textModelProviders: Array<{ value: TextModelProvider; label: string }> = [
   { value: 'custom', label: '自定义' },
 ];
 
+const aiRequestModeOptions: Array<{ value: AiRequestMode; label: string }> = [
+  { value: 'normal', label: '普通请求' },
+  { value: 'stream', label: '流式请求' },
+];
+
 const textProviderDefaults: TextModelProfiles = {
-  jinlong: { api_key: '', base_url: 'https://jlaudeapi.com/v1', model_name: 'gpt-3.5-turbo' },
-  volcengine: { api_key: '', base_url: 'https://ark.cn-beijing.volces.com/api/v3', model_name: '' },
-  deepseek: { api_key: '', base_url: 'https://api.deepseek.com', model_name: '' },
-  longcat: { api_key: '', base_url: 'https://api.longcat.chat/openai/v1', model_name: '' },
-  custom: { api_key: '', base_url: '', model_name: '' },
+  jinlong: { api_key: '', base_url: 'https://jlaudeapi.com/v1', model_name: 'gpt-3.5-turbo', request_mode: 'stream' },
+  volcengine: { api_key: '', base_url: 'https://ark.cn-beijing.volces.com/api/v3', model_name: '', request_mode: 'stream' },
+  deepseek: { api_key: '', base_url: 'https://api.deepseek.com', model_name: '', request_mode: 'stream' },
+  longcat: { api_key: '', base_url: 'https://api.longcat.chat/openai/v1', model_name: '', request_mode: 'stream' },
+  custom: { api_key: '', base_url: '', model_name: '', request_mode: 'stream' },
 };
 
 const textProviderApiKeyUrls: Partial<Record<TextModelProvider, string>> = {
@@ -47,6 +61,10 @@ function createDefaultTextModelProfiles(): TextModelProfiles {
   }), {} as TextModelProfiles);
 }
 
+function normalizeAiRequestMode(value?: AiRequestMode): AiRequestMode {
+  return value === 'normal' ? 'normal' : 'stream';
+}
+
 function normalizeTextModelProfile(provider: TextModelProvider, profile?: Partial<TextModelConfig>): TextModelConfig {
   const defaults = textProviderDefaults[provider];
   const baseUrl = provider === 'custom' ? profile?.base_url ?? defaults.base_url : defaults.base_url;
@@ -54,6 +72,7 @@ function normalizeTextModelProfile(provider: TextModelProvider, profile?: Partia
     api_key: profile?.api_key ?? defaults.api_key,
     base_url: baseUrl,
     model_name: profile?.model_name ?? defaults.model_name,
+    request_mode: normalizeAiRequestMode(profile?.request_mode ?? defaults.request_mode),
   };
 }
 
@@ -69,6 +88,7 @@ function textProfileFromState(textModel: SettingsPageState['textModel']): TextMo
     api_key: textModel.api_key,
     base_url: textModel.provider === 'custom' ? textModel.base_url : textProviderDefaults[textModel.provider].base_url,
     model_name: textModel.model_name,
+    request_mode: textModel.request_mode,
   };
 }
 
@@ -85,6 +105,7 @@ const imageProviderDefaults: ImageModelProfiles = {
     base_url: 'https://jlaudeapi.com/v1',
     api_key: '',
     model_name: '',
+    request_mode: 'stream',
     status: 'untested',
     tested_at: '',
     last_error: '',
@@ -94,6 +115,7 @@ const imageProviderDefaults: ImageModelProfiles = {
     base_url: 'https://ark.cn-beijing.volces.com/api/v3',
     api_key: '',
     model_name: '',
+    request_mode: 'stream',
     status: 'untested',
     tested_at: '',
     last_error: '',
@@ -103,6 +125,7 @@ const imageProviderDefaults: ImageModelProfiles = {
     base_url: 'https://generativelanguage.googleapis.com/v1beta',
     api_key: '',
     model_name: 'gemini-3.1-flash-image-preview',
+    request_mode: 'stream',
     status: 'untested',
     tested_at: '',
     last_error: '',
@@ -112,6 +135,7 @@ const imageProviderDefaults: ImageModelProfiles = {
     base_url: '',
     api_key: '',
     model_name: '',
+    request_mode: 'stream',
     status: 'untested',
     tested_at: '',
     last_error: '',
@@ -174,6 +198,7 @@ function normalizeImageModelProfile(provider: ImageModelProvider, profile?: Part
     base_url: provider === 'custom' ? profile?.base_url ?? defaults.base_url : defaults.base_url,
     api_key: profile?.api_key ?? defaults.api_key,
     model_name: profile?.model_name ?? defaults.model_name,
+    request_mode: normalizeAiRequestMode(profile?.request_mode ?? defaults.request_mode),
     status: profile?.status ?? defaults.status,
     tested_at: profile?.tested_at ?? defaults.tested_at,
     last_error: profile?.last_error ?? defaults.last_error,
@@ -193,6 +218,7 @@ function imageProfileFromState(imageModel: ImageModelConfig): ImageModelConfig {
     base_url: imageModel.provider === 'custom' ? imageModel.base_url || '' : imageProviderDefaults[imageModel.provider].base_url,
     api_key: imageModel.api_key,
     model_name: imageModel.model_name,
+    request_mode: imageModel.request_mode,
     status: imageModel.status || 'untested',
     tested_at: imageModel.tested_at || '',
     last_error: imageModel.last_error || '',
@@ -303,6 +329,9 @@ const initialState: SettingsPageState = {
   },
   general: {
     developer_mode: false,
+    update_channel: 'github',
+    gpu_hardware_acceleration_enabled: true,
+    gpu_hardware_acceleration_configured: true,
   },
 };
 
@@ -384,6 +413,9 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
         },
         general: {
           developer_mode: Boolean(config.developer_mode),
+          update_channel: normalizeUpdateChannel(config.update_channel),
+          gpu_hardware_acceleration_enabled: Boolean(config.gpu_hardware_acceleration_enabled),
+          gpu_hardware_acceleration_configured: Boolean(config.gpu_hardware_acceleration_configured),
         },
       }));
       setSavedConfig(config);
@@ -416,12 +448,16 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
       api_key: activeTextProfile.api_key,
       base_url: activeTextProfile.base_url,
       model_name: activeTextProfile.model_name,
+      request_mode: activeTextProfile.request_mode,
       image_model: activeImageProfile,
       image_model_profiles: imageModelProfiles,
       file_parser: {
         provider: state.fileParser.provider,
         mineru_token: state.fileParser.mineru_token || '',
       },
+      update_channel: state.general.update_channel,
+      gpu_hardware_acceleration_enabled: state.general.gpu_hardware_acceleration_enabled,
+      gpu_hardware_acceleration_configured: state.general.gpu_hardware_acceleration_configured,
       developer_mode: state.general.developer_mode,
     };
   };
@@ -532,6 +568,24 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
       general: { ...prev.general, developer_mode: developerMode },
     }));
     onDeveloperModeChange?.(developerMode);
+  };
+
+  const updateUpdateChannel = (updateChannel: UpdateChannel) => {
+    setState((prev) => ({
+      ...prev,
+      general: { ...prev.general, update_channel: updateChannel },
+    }));
+  };
+
+  const updateGpuHardwareAcceleration = (enabled: boolean) => {
+    setState((prev) => ({
+      ...prev,
+      general: {
+        ...prev.general,
+        gpu_hardware_acceleration_enabled: enabled,
+        gpu_hardware_acceleration_configured: true,
+      },
+    }));
   };
 
   const updateTextModelProvider = (provider: TextModelProvider) => {
@@ -855,7 +909,17 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
     }
 
     if (activeTab === 'general') {
-      return Boolean(state.general.developer_mode) !== Boolean(savedConfig.developer_mode);
+      return JSON.stringify({
+        developer_mode: Boolean(state.general.developer_mode),
+        update_channel: state.general.update_channel,
+        gpu_hardware_acceleration_enabled: Boolean(state.general.gpu_hardware_acceleration_enabled),
+        gpu_hardware_acceleration_configured: Boolean(state.general.gpu_hardware_acceleration_configured),
+      }) !== JSON.stringify({
+        developer_mode: Boolean(savedConfig.developer_mode),
+        update_channel: normalizeUpdateChannel(savedConfig.update_channel),
+        gpu_hardware_acceleration_enabled: Boolean(savedConfig.gpu_hardware_acceleration_enabled),
+        gpu_hardware_acceleration_configured: Boolean(savedConfig.gpu_hardware_acceleration_configured),
+      });
     }
 
     if (activeTab === 'image-model') {
@@ -877,7 +941,43 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
 
   const saveActiveTabConfig = async () => {
     if (activeTab === 'general') {
-      await saveClientConfig(createClientConfig());
+      const nextConfig = createClientConfig();
+      const previousGpuEnabled = Boolean(savedConfig?.gpu_hardware_acceleration_enabled);
+      const nextGpuEnabled = Boolean(state.general.gpu_hardware_acceleration_enabled);
+
+      if (!previousGpuEnabled && nextGpuEnabled) {
+        const saved = await saveClientConfig({
+          ...nextConfig,
+          gpu_hardware_acceleration_enabled: false,
+          gpu_hardware_acceleration_configured: true,
+        });
+        if (saved) {
+          try {
+            const result = await window.yibiao?.startGpuHardwareAccelerationTrial();
+            if (!result?.success) {
+              throw new Error('GPU 硬件加速试启用失败');
+            }
+            showToast('即将重启试用 GPU 硬件加速', 'info');
+          } catch (error) {
+            setState((prev) => ({
+              ...prev,
+              general: {
+                ...prev.general,
+                gpu_hardware_acceleration_enabled: false,
+                gpu_hardware_acceleration_configured: true,
+              },
+            }));
+            const message = error instanceof Error ? error.message : 'GPU 硬件加速试启用失败';
+            showToast(`${message}，已保持关闭，请稍后重试。`, 'error');
+          }
+        }
+        return;
+      }
+
+      const saved = await saveClientConfig(nextConfig);
+      if (saved && previousGpuEnabled !== nextGpuEnabled) {
+        showToast(nextGpuEnabled ? 'GPU 硬件加速将在重启后启用' : 'GPU 硬件加速将在重启后关闭', 'info');
+      }
       return;
     }
     if (activeTab === 'text-model') {
@@ -991,6 +1091,36 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
                 <option value="classic">经典布局</option>
               </select>
             </div>
+            <label className="settings-row">
+              <div className="settings-row-copy">
+                <strong>自动更新渠道</strong>
+                <span>{updateChannelOptions.find((option) => option.value === state.general.update_channel)?.description || '选择自动检查更新和下载客户端安装包的来源'}</span>
+              </div>
+              <select
+                value={state.general.update_channel}
+                onChange={(event) => updateUpdateChannel(event.target.value as UpdateChannel)}
+              >
+                {updateChannelOptions.map((option) => (
+                  <option value={option.value} key={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="settings-row">
+              <div className="settings-row-copy">
+                <strong>GPU 硬件加速</strong>
+                <span>启用后界面可能更流畅；极少数电脑启用后会闪退，关闭后兼容性更好。修改后需重启生效。</span>
+              </div>
+              <span className="settings-switch-control">
+                <input
+                  type="checkbox"
+                  checked={state.general.gpu_hardware_acceleration_enabled}
+                  onChange={(event) => updateGpuHardwareAcceleration(event.target.checked)}
+                />
+                <span className="settings-switch-track" aria-hidden="true">
+                  <span className="settings-switch-thumb" />
+                </span>
+              </span>
+            </label>
             <label className="settings-row">
               <div className="settings-row-copy">
                 <strong>开发者模式</strong>
@@ -1110,6 +1240,20 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
                 </button>
               </div>
             </label>
+            <label className="settings-row">
+              <div className="settings-row-copy">
+                <strong>请求方式</strong>
+                <span>流式请求只影响后端调用方式，应用仍等待完整结果后继续流程</span>
+              </div>
+              <select
+                value={state.textModel.request_mode}
+                onChange={(event) => updateTextModelConfig({ request_mode: event.target.value as AiRequestMode })}
+              >
+                {aiRequestModeOptions.map((option) => (
+                  <option value={option.value} key={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
           </div>
         </section>
       )}
@@ -1210,6 +1354,20 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
                   {testingImageModel ? '测试中' : '测试'}
                 </button>
               </div>
+            </label>
+            <label className="settings-row">
+              <div className="settings-row-copy">
+                <strong>请求方式</strong>
+                <span>流式请求只影响后端调用方式，应用仍等待完整图片生成后继续流程</span>
+              </div>
+              <select
+                value={state.imageModel.request_mode}
+                onChange={(event) => updateImageModelConfig({ request_mode: event.target.value as AiRequestMode })}
+              >
+                {aiRequestModeOptions.map((option) => (
+                  <option value={option.value} key={option.value}>{option.label}</option>
+                ))}
+              </select>
             </label>
           </div>
           {imageTestPreview && (

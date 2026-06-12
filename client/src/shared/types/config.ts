@@ -1,9 +1,12 @@
 export type TextModelProvider = 'jinlong' | 'volcengine' | 'deepseek' | 'longcat' | 'custom';
+export type AiRequestMode = 'normal' | 'stream';
+export type UpdateChannel = 'github' | 'cloudflare';
 
 export interface TextModelConfig {
   api_key: string;
   base_url: string;
   model_name: string;
+  request_mode: AiRequestMode;
 }
 
 export type TextModelProfiles = Record<TextModelProvider, TextModelConfig>;
@@ -41,6 +44,7 @@ export interface ImageModelConfig {
   base_url?: string;
   api_key: string;
   model_name: string;
+  request_mode: AiRequestMode;
   status?: ImageModelStatus;
   tested_at?: string;
   last_error?: string;
@@ -59,6 +63,9 @@ export interface ClientConfig extends AiConfig {
   image_model: ImageModelConfig;
   image_model_profiles: ImageModelProfiles;
   file_parser: FileParserConfig;
+  update_channel?: UpdateChannel;
+  gpu_hardware_acceleration_enabled?: boolean;
+  gpu_hardware_acceleration_configured?: boolean;
   export_format?: import('./exportFormat').ExportFormatConfig;
   developer_mode?: boolean;
   analytics_client_id?: string;

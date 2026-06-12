@@ -28,6 +28,7 @@ export type {
 } from './bid';
 export type {
   AiConfig,
+  AiRequestMode,
   ClientConfig,
   ConfigSaveResult,
   FileParserConfig,
@@ -41,6 +42,7 @@ export type {
   TextModelConfig,
   TextModelProvider,
   TextModelProfiles,
+  UpdateChannel,
 } from './config';
 export type { AppMenuItem, SectionId } from './navigation';
 export type {
@@ -64,7 +66,7 @@ export {
   HEADING_LEVEL_LABELS,
 } from './exportFormat';
 export type { OutlineData, OutlineItem, OutlineMode, TechnicalRequirementGroup } from './outline';
-export type { LatestReleaseInfo, UpdateCheckResult, WordExportProgressEvent, WordExportResult, WorkspaceDatabasePhase, WorkspaceDatabaseStatus, YibiaoBridge } from './ipc';
+export type { GpuHardwareAccelerationStatus, LatestReleaseInfo, UpdateCheckResult, WordExportProgressEvent, WordExportResult, WorkspaceDatabasePhase, WorkspaceDatabaseStatus, YibiaoBridge } from './ipc';
 export type {
   RejectionCheckFinding,
   RejectionCheckResultState,
@@ -75,6 +77,7 @@ export type {
   RejectionCheckWorkspaceState,
   RejectionDocumentContent,
   RejectionDocumentRole,
+  RejectionDocumentTabId,
   RejectionDocumentSource,
   RejectionExtractionSource,
   RejectionExtractionState,

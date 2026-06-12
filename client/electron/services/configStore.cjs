@@ -5,6 +5,8 @@ const { getConfigFilePath } = require('../utils/paths.cjs');
 
 const textModelProviders = ['jinlong', 'volcengine', 'deepseek', 'longcat', 'custom'];
 const imageModelProviders = ['jinlong', 'volcengine', 'google-ai-studio', 'custom'];
+const aiRequestModes = ['normal', 'stream'];
+const updateChannels = ['github', 'cloudflare'];
 
 const textProviderBaseUrls = {
   jinlong: 'https://jlaudeapi.com/v1',
@@ -19,26 +21,31 @@ const defaultTextModelProfiles = {
     api_key: '',
     base_url: textProviderBaseUrls.jinlong,
     model_name: 'gpt-3.5-turbo',
+    request_mode: 'stream',
   },
   volcengine: {
     api_key: '',
     base_url: textProviderBaseUrls.volcengine,
     model_name: '',
+    request_mode: 'stream',
   },
   deepseek: {
     api_key: '',
     base_url: textProviderBaseUrls.deepseek,
     model_name: '',
+    request_mode: 'stream',
   },
   longcat: {
     api_key: '',
     base_url: textProviderBaseUrls.longcat,
     model_name: '',
+    request_mode: 'stream',
   },
   custom: {
     api_key: '',
     base_url: '',
     model_name: '',
+    request_mode: 'stream',
   },
 };
 
@@ -48,6 +55,7 @@ const defaultImageModelProfiles = {
     base_url: 'https://jlaudeapi.com/v1',
     api_key: '',
     model_name: '',
+    request_mode: 'stream',
     status: 'untested',
     tested_at: '',
     last_error: '',
@@ -57,6 +65,7 @@ const defaultImageModelProfiles = {
     base_url: 'https://ark.cn-beijing.volces.com/api/v3',
     api_key: '',
     model_name: '',
+    request_mode: 'stream',
     status: 'untested',
     tested_at: '',
     last_error: '',
@@ -66,6 +75,7 @@ const defaultImageModelProfiles = {
     base_url: 'https://generativelanguage.googleapis.com/v1beta',
     api_key: '',
     model_name: 'gemini-3.1-flash-image-preview',
+    request_mode: 'stream',
     status: 'untested',
     tested_at: '',
     last_error: '',
@@ -75,6 +85,7 @@ const defaultImageModelProfiles = {
     base_url: '',
     api_key: '',
     model_name: '',
+    request_mode: 'stream',
     status: 'untested',
     tested_at: '',
     last_error: '',
@@ -122,6 +133,7 @@ const defaultConfig = {
   api_key: '',
   base_url: textProviderBaseUrls.jinlong,
   model_name: 'gpt-3.5-turbo',
+  request_mode: 'stream',
   image_model: {
     ...defaultImageModelProfiles.jinlong,
   },
@@ -130,6 +142,9 @@ const defaultConfig = {
     provider: 'local',
     mineru_token: '',
   },
+  update_channel: 'github',
+  gpu_hardware_acceleration_enabled: true,
+  gpu_hardware_acceleration_configured: true,
   export_format: defaultExportFormat,
   developer_mode: false,
   analytics_client_id: '',
@@ -152,6 +167,14 @@ function isImageModelProvider(value) {
   return imageModelProviders.includes(value);
 }
 
+function normalizeAiRequestMode(value, fallback = 'stream') {
+  return aiRequestModes.includes(value) ? value : fallback;
+}
+
+function normalizeUpdateChannel(value, fallback = defaultConfig.update_channel) {
+  return updateChannels.includes(value) ? value : fallback;
+}
+
 function normalizeTextModelProfile(provider, profile) {
   const defaults = defaultTextModelProfiles[provider];
   const source = profile || {};
@@ -162,6 +185,7 @@ function normalizeTextModelProfile(provider, profile) {
     api_key: source.api_key !== undefined ? source.api_key : defaults.api_key,
     base_url: sourceBaseUrl,
     model_name: source.model_name !== undefined ? source.model_name : defaults.model_name,
+    request_mode: normalizeAiRequestMode(source.request_mode, defaults.request_mode),
   };
 }
 
@@ -184,6 +208,7 @@ function textProfileFromFlatConfig(source, fallback, provider) {
     api_key: source.api_key !== undefined ? source.api_key : fallback.api_key,
     base_url: sourceBaseUrl,
     model_name: source.model_name !== undefined ? source.model_name : fallback.model_name,
+    request_mode: normalizeAiRequestMode(source.request_mode !== undefined ? source.request_mode : fallback.request_mode, fallback.request_mode),
   };
 }
 
@@ -212,6 +237,7 @@ function textProfileFromUnknownProvider(source, sourceProvider, fallback) {
     api_key: pickTextProfileField(source.api_key, selectedProfile?.api_key, fallback.api_key),
     base_url: pickTextProfileField(source.base_url, selectedProfile?.base_url, fallback.base_url),
     model_name: pickTextProfileField(source.model_name, selectedProfile?.model_name, fallback.model_name),
+    request_mode: normalizeAiRequestMode(pickTextProfileField(source.request_mode, selectedProfile?.request_mode, fallback.request_mode), fallback.request_mode),
   };
 }
 
@@ -225,6 +251,7 @@ function normalizeImageModelProfile(provider, profile) {
       : defaults.base_url,
     api_key: source.api_key !== undefined ? source.api_key : defaults.api_key,
     model_name: source.model_name !== undefined ? source.model_name : defaults.model_name,
+    request_mode: normalizeAiRequestMode(source.request_mode, defaults.request_mode),
     status: source.status !== undefined ? source.status : defaults.status,
     tested_at: source.tested_at !== undefined ? source.tested_at : defaults.tested_at,
     last_error: source.last_error !== undefined ? source.last_error : defaults.last_error,
@@ -316,6 +343,14 @@ function normalizeConfig(config) {
   const imageModelProfiles = normalizeImageModelProfiles(source.image_model_profiles);
   imageModelProfiles[imageModelProvider] = normalizeImageModelProfile(imageModelProvider, sourceImageModel);
   const activeImageProfile = imageModelProfiles[imageModelProvider];
+  const hasGpuHardwareAccelerationEnabled = typeof source.gpu_hardware_acceleration_enabled === 'boolean';
+  const hasGpuHardwareAccelerationConfigured = typeof source.gpu_hardware_acceleration_configured === 'boolean';
+  const gpuHardwareAccelerationConfigured = hasGpuHardwareAccelerationConfigured
+    ? source.gpu_hardware_acceleration_configured
+    : defaultConfig.gpu_hardware_acceleration_configured;
+  const gpuHardwareAccelerationEnabled = gpuHardwareAccelerationConfigured === false
+    ? defaultConfig.gpu_hardware_acceleration_enabled
+    : hasGpuHardwareAccelerationEnabled ? source.gpu_hardware_acceleration_enabled : defaultConfig.gpu_hardware_acceleration_enabled;
 
   return {
     ...defaultConfig,
@@ -324,12 +359,16 @@ function normalizeConfig(config) {
     api_key: activeTextProfile.api_key,
     base_url: activeTextProfile.base_url,
     model_name: activeTextProfile.model_name,
+    request_mode: activeTextProfile.request_mode,
     image_model: activeImageProfile,
     image_model_profiles: imageModelProfiles,
     file_parser: {
       provider: fileParser.provider || defaultConfig.file_parser.provider,
       mineru_token: fileParser.mineru_token || defaultConfig.file_parser.mineru_token,
     },
+    update_channel: normalizeUpdateChannel(source.update_channel),
+    gpu_hardware_acceleration_enabled: gpuHardwareAccelerationEnabled,
+    gpu_hardware_acceleration_configured: gpuHardwareAccelerationConfigured === false ? true : gpuHardwareAccelerationConfigured,
     export_format: normalizeExportFormat(source.export_format),
     developer_mode: source.developer_mode === undefined ? defaultConfig.developer_mode : Boolean(source.developer_mode),
     analytics_client_id: source.analytics_client_id || defaultConfig.analytics_client_id,
@@ -341,8 +380,18 @@ function createConfigStore(app) {
   const configFile = getConfigFilePath(app);
 
   function persist(config) {
+    let tempFile = '';
     fs.mkdirSync(path.dirname(configFile), { recursive: true });
-    fs.writeFileSync(configFile, JSON.stringify(config, null, 2), 'utf-8');
+    try {
+      tempFile = `${configFile}.${process.pid}.${Date.now()}.tmp`;
+      fs.writeFileSync(tempFile, JSON.stringify(config, null, 2), 'utf-8');
+      fs.renameSync(tempFile, configFile);
+    } catch (error) {
+      if (tempFile) {
+        try { fs.rmSync(tempFile, { force: true }); } catch {}
+      }
+      throw error;
+    }
   }
 
   function withAnalyticsIdentity(config) {

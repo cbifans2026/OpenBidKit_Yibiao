@@ -1,5 +1,4 @@
 const { ipcMain, shell } = require('electron');
-const https = require('node:https');
 const { registerAiIpc } = require('./aiIpc.cjs');
 const { registerConfigIpc } = require('./configIpc.cjs');
 const { registerDuplicateCheckIpc } = require('./duplicateCheckIpc.cjs');
@@ -162,13 +161,46 @@ function registerWorkspaceDatabaseServices({ app, configStore, aiService, fileSe
   return { sqliteDatabase };
 }
 
-function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerUpdateDownload, quitAndInstall }) {
+function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerUpdateDownload, quitAndInstall, getLatestVersion, getUpdateDownloadUrl, gpuStartupState = {}, gpuTrialArg = '--yibiao-trial-hardware-acceleration', forceDisableGpuArgs = [] }) {
   const configStore = createConfigStore(app);
   const aiService = createAiService({ app, configStore });
   const fileService = createFileService({ app, configStore });
   const exportService = createExportService({ configStore });
   const databaseStatus = registerWorkspaceDatabaseStatusIpc({ mainWindow });
   let workspaceDatabaseStarted = false;
+  let gpuTrialRelaunchStarted = false;
+
+  const saveGpuHardwareAccelerationPreference = (enabled) => {
+    const nextEnabled = Boolean(enabled);
+    const currentConfig = configStore.load();
+    const result = configStore.save({
+      ...currentConfig,
+      gpu_hardware_acceleration_enabled: nextEnabled,
+      gpu_hardware_acceleration_configured: true,
+    });
+    return {
+      ...result,
+      enabled: nextEnabled,
+      configured: true,
+      restartRequired: nextEnabled !== Boolean(gpuStartupState.hardwareAccelerationEnabled),
+    };
+  };
+
+  const buildGpuTrialRelaunchArgs = () => {
+    const excludedArgs = new Set([gpuTrialArg, ...forceDisableGpuArgs]);
+    return process.argv
+      .slice(1)
+      .filter((arg) => !excludedArgs.has(String(arg).split('=')[0]))
+      .concat(gpuTrialArg);
+  };
+
+  const buildGpuDisabledRelaunchArgs = () => {
+    const excludedArgs = new Set([gpuTrialArg, ...forceDisableGpuArgs]);
+    return process.argv
+      .slice(1)
+      .filter((arg) => !excludedArgs.has(String(arg).split('=')[0]))
+      .concat('--disable-gpu');
+  };
 
   registerConfigIpc({ configStore, aiService });
   registerAiIpc({ aiService });
@@ -202,6 +234,48 @@ function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerU
 
   ipcMain.handle('app:get-version', () => app.getVersion());
 
+  ipcMain.handle('app:get-gpu-hardware-acceleration-status', () => {
+    const config = configStore.load();
+    return {
+      configured: Boolean(config.gpu_hardware_acceleration_configured),
+      enabled: Boolean(config.gpu_hardware_acceleration_enabled),
+      currentEnabled: Boolean(gpuStartupState.hardwareAccelerationEnabled),
+      trial: Boolean(gpuStartupState.trial),
+      forcedDisabled: Boolean(gpuStartupState.forcedDisabled),
+    };
+  });
+
+  ipcMain.handle('app:save-gpu-hardware-acceleration-preference', (_event, enabled) => saveGpuHardwareAccelerationPreference(enabled));
+
+  ipcMain.handle('app:start-gpu-hardware-acceleration-trial', () => {
+    if (gpuTrialRelaunchStarted) {
+      return { success: true };
+    }
+
+    gpuTrialRelaunchStarted = true;
+    const args = buildGpuTrialRelaunchArgs();
+    setTimeout(() => {
+      app.relaunch({ args });
+      app.exit(0);
+    }, 50);
+    return { success: true };
+  });
+
+  ipcMain.handle('app:relaunch-with-gpu-hardware-acceleration-disabled', () => {
+    saveGpuHardwareAccelerationPreference(false);
+    if (gpuTrialRelaunchStarted) {
+      return { success: true };
+    }
+
+    gpuTrialRelaunchStarted = true;
+    const args = buildGpuDisabledRelaunchArgs();
+    setTimeout(() => {
+      app.relaunch({ args });
+      app.exit(0);
+    }, 50);
+    return { success: true };
+  });
+
   ipcMain.handle('app:open-external', async (_event, url) => {
     const externalUrl = normalizeExternalUrl(url);
     if (!externalUrl) {
@@ -217,34 +291,8 @@ function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerU
     }
   });
 
-  ipcMain.handle('app:get-latest-version', () => {
-    return new Promise((resolve, reject) => {
-      const url = 'https://api.github.com/repos/FB208/OpenBidKit_Yibiao/releases/latest';
-      const request = https.get(url, { headers: { 'User-Agent': 'yibiao-client' } }, (response) => {
-        let data = '';
-        response.on('data', (chunk) => { data += chunk; });
-        response.on('end', () => {
-          try {
-            const release = JSON.parse(data);
-            resolve({
-              version: release.tag_name?.replace(/^v/, '') || '',
-              name: release.name || '',
-              body: release.body || '',
-              published_at: release.published_at || '',
-              html_url: release.html_url || '',
-            });
-          } catch (error) {
-            reject(new Error('解析 GitHub API 响应失败'));
-          }
-        });
-      });
-      request.on('error', (error) => reject(error));
-      request.setTimeout(10000, () => {
-        request.destroy();
-        reject(new Error('请求超时'));
-      });
-    });
-  });
+  ipcMain.handle('app:get-latest-version', () => getLatestVersion({ configStore }));
+  ipcMain.handle('app:get-update-download-url', () => getUpdateDownloadUrl({ configStore }));
   ipcMain.handle('app:quit-and-install', () => {
     quitAndInstall();
   });
@@ -254,6 +302,7 @@ function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerU
     return checkAndDownloadUpdate({
       app,
       mainWindow,
+      configStore,
       onProgress: (percent) => {
         webContents.send('app:update-progress', { percent });
       },
@@ -271,6 +320,7 @@ function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerU
     return triggerUpdateDownload({
       app,
       mainWindow,
+      configStore,
       onProgress: (percent) => {
         webContents.send('app:update-progress', { percent });
       },

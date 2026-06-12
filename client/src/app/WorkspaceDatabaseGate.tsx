@@ -5,6 +5,8 @@ interface WorkspaceDatabaseGateProps {
   children: ReactNode;
 }
 
+const DATABASE_VERSION_TOO_NEW_MARKER = '高于当前客户端支持版本';
+
 const phaseLabels: Record<WorkspaceDatabasePhase, string> = {
   checking: '正在检查本地数据库',
   repairing: '正在修复本地数据库结构',
@@ -17,6 +19,13 @@ const phaseLabels: Record<WorkspaceDatabasePhase, string> = {
 function WorkspaceDatabaseGate({ children }: WorkspaceDatabaseGateProps) {
   const [status, setStatus] = useState<WorkspaceDatabaseStatus | null>(null);
   const [showGate, setShowGate] = useState(false);
+
+  const openReleasePage = async () => {
+    const url = await window.yibiao?.getUpdateDownloadUrl();
+    if (url) {
+      await window.yibiao?.openExternal(url);
+    }
+  };
 
   useEffect(() => {
     const database = window.yibiao?.database;
@@ -76,6 +85,7 @@ function WorkspaceDatabaseGate({ children }: WorkspaceDatabaseGateProps) {
 
   const title = status ? phaseLabels[status.phase] : '正在准备本地数据库';
   const message = status?.message || '正在检查并升级本地数据库，请稍候';
+  const showReleaseLink = failed && message.includes(DATABASE_VERSION_TOO_NEW_MARKER);
 
   return (
     <div className="workspace-database-gate" role="status" aria-live="polite">
@@ -89,6 +99,12 @@ function WorkspaceDatabaseGate({ children }: WorkspaceDatabaseGateProps) {
           <p>{message}</p>
           {!failed && <small>完成前请不要关闭应用，数据库就绪后会自动进入工作台。</small>}
           {failed && <small>请重启应用重试；如果仍然失败，请联系技术支持并保留错误信息。</small>}
+          {showReleaseLink && (
+            <div className="workspace-database-actions">
+              <button type="button" className="primary-action" onClick={openReleasePage}>下载新版客户端</button>
+              <span>将打开当前自动更新渠道的新版下载地址，请下载并安装新版客户端后重试。</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

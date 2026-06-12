@@ -1,6 +1,6 @@
 import type { ChatCompletionRequest, JsonCompletionRequest } from './ai';
 import type { DuplicateCheckWorkspaceState, FileSelectionResult } from './bid';
-import type { ClientConfig, ConfigSaveResult, ImageModelTestResult, ModelListResult } from './config';
+import type { ClientConfig, ConfigSaveResult, ImageModelTestResult, ModelListResult, UpdateChannel } from './config';
 import type { KnowledgeAnalysisSnapshot, KnowledgeBaseEvent, KnowledgeBaseIndex, KnowledgeBaseIndexMutationResult, KnowledgeBaseMigrationResult, KnowledgeBaseMigrationStatus, KnowledgeBaseMutationResult, KnowledgeBaseRetryDocumentResult, KnowledgeBaseStartMatchingResult, KnowledgeBaseUploadResult, KnowledgeDocument, KnowledgeFolder, KnowledgeItem } from '../../features/knowledge-base/types';
 import type { RejectionCheckWorkspaceState, RejectionDocumentRole } from '../../features/rejection-check/types';
 import type { BidAnalysisMode, BidAnalysisTaskState, ContentGenerationOptions, ContentGenerationPlanState, ContentGenerationRuntimeState, ContentGenerationSectionState, DetectedBidSection, GlobalFactGroupState, SaveOutlineRequest, TechnicalPlanState, TechnicalPlanStep, TechnicalPlanWorkflowKind } from '../../features/technical-plan/types';
@@ -41,6 +41,8 @@ export interface LatestReleaseInfo {
   body: string;
   published_at: string;
   html_url: string;
+  download_url?: string;
+  channel?: UpdateChannel;
 }
 
 export interface UpdateCheckResult {
@@ -50,6 +52,15 @@ export interface UpdateCheckResult {
   downloaded?: boolean;
   failed?: boolean;
   message?: string;
+  channel?: UpdateChannel;
+}
+
+export interface GpuHardwareAccelerationStatus {
+  configured: boolean;
+  enabled: boolean;
+  currentEnabled: boolean;
+  trial: boolean;
+  forcedDisabled: boolean;
 }
 
 export type WorkspaceDatabasePhase = 'checking' | 'repairing' | 'backing-up' | 'upgrading' | 'ready' | 'error';
@@ -69,7 +80,12 @@ export interface YibiaoBridge {
   appName: string;
   platform: string;
   getVersion: () => Promise<string>;
+  getGpuHardwareAccelerationStatus: () => Promise<GpuHardwareAccelerationStatus>;
+  saveGpuHardwareAccelerationPreference: (enabled: boolean) => Promise<ConfigSaveResult & { enabled: boolean; configured: boolean; restartRequired: boolean }>;
+  startGpuHardwareAccelerationTrial: () => Promise<{ success: boolean }>;
+  relaunchWithGpuHardwareAccelerationDisabled: () => Promise<{ success: boolean }>;
   getLatestVersion: () => Promise<LatestReleaseInfo>;
+  getUpdateDownloadUrl: () => Promise<string>;
   openExternal: (url: string) => Promise<{ success: boolean; message?: string }>;
   checkUpdate: () => Promise<UpdateCheckResult>;
   startUpdate: () => Promise<UpdateCheckResult>;
@@ -158,7 +174,7 @@ export interface YibiaoBridge {
     loadState: () => Promise<RejectionCheckWorkspaceState>;
     importDocument: (role: RejectionDocumentRole) => Promise<{ success: boolean; message?: string; state: RejectionCheckWorkspaceState }>;
     importTenderFromTechnicalPlan: () => Promise<{ success: boolean; message?: string; state: RejectionCheckWorkspaceState }>;
-    removeDocument: (role: RejectionDocumentRole) => Promise<RejectionCheckWorkspaceState>;
+    removeDocument: (role: RejectionDocumentRole, documentId?: string) => Promise<RejectionCheckWorkspaceState>;
     saveUiState: (payload: Partial<Pick<RejectionCheckWorkspaceState, 'step' | 'activeDocumentTab' | 'activeResultTab' | 'activeCheckResultTab' | 'customCheckItems' | 'checkOptions'>>) => Promise<RejectionCheckWorkspaceState>;
     updateState: (partial: Partial<RejectionCheckWorkspaceState>) => Promise<RejectionCheckWorkspaceState>;
     clear: () => Promise<{ success: boolean; message?: string; state: RejectionCheckWorkspaceState }>;
