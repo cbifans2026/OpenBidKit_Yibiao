@@ -1,7 +1,7 @@
-import { DATASET } from '../constants.js';
+import { ALLOWED_EVENTS, DATASET } from '../constants.js';
 import { json, methodNotAllowed, requireAdmin, unauthorized } from '../http.js';
 import { queryAnalytics } from '../services/analyticsQuery.js';
-import { isValidProjectName, logQueryError, normalizeText, safePage, sqlString } from '../utils.js';
+import { businessDateTimeSqlExpression, isValidProjectName, logQueryError, normalizeText, safePage, sqlString } from '../utils.js';
 
 export async function handleLatest(request, env, url) {
   if (request.method !== 'GET') {
@@ -14,25 +14,28 @@ export async function handleLatest(request, env, url) {
 
   const projectName = normalizeText(url.searchParams.get('projectName'), 80);
   const page = safePage(url.searchParams.get('page'));
+  const event = normalizeText(url.searchParams.get('event'), 50);
   const pageSize = 10;
   const offset = (page - 1) * pageSize;
 
-  if (!isValidProjectName(projectName)) {
-    return json({ code: 400, message: 'invalid projectName' }, { status: 400 });
+  if (!isValidProjectName(projectName) || (event && !ALLOWED_EVENTS.has(event))) {
+    return json({ code: 400, message: 'invalid params' }, { status: 400 });
   }
 
   const project = sqlString(projectName);
+  const eventCondition = event ? `AND blob2 = ${sqlString(event)}` : '';
 
   const totalSql = `
     SELECT
       COUNT() AS total
     FROM ${DATASET}
     WHERE blob1 = ${project}
+      ${eventCondition}
   `;
 
   const sql = `
     SELECT
-      timestamp,
+      ${businessDateTimeSqlExpression()} AS timestamp,
       blob1 AS projectName,
       blob2 AS event,
       blob3 AS page,
@@ -43,7 +46,8 @@ export async function handleLatest(request, env, url) {
       blob8 AS clientCreatedAt
     FROM ${DATASET}
     WHERE blob1 = ${project}
-    ORDER BY timestamp DESC
+      ${eventCondition}
+    ORDER BY timestamp DESC, clientId DESC, event DESC, page DESC
     LIMIT ${pageSize} OFFSET ${offset}
   `;
 
@@ -56,6 +60,7 @@ export async function handleLatest(request, env, url) {
       code: 0,
       page,
       pageSize,
+      event,
       total: Number(total.data?.[0]?.total || 0),
       events: latest.data || [],
     });

@@ -37,7 +37,7 @@ export function renderTable(target, rows, columns, emptyText) {
   const body = rows.map((row) => {
     const cells = columns.map((column) => {
       const value = row[column.key] == null || row[column.key] === '' ? '-' : row[column.key];
-      const content = column.code ? `<code>${escapeHtml(value)}</code>` : escapeHtml(value);
+      const content = column.html ? value : column.code ? `<code>${escapeHtml(value)}</code>` : escapeHtml(value);
       return `<td>${content}</td>`;
     }).join('');
     return `<tr>${cells}</tr>`;
@@ -49,6 +49,8 @@ export function renderTable(target, rows, columns, emptyText) {
 export function updateLatestPager() {
   const totalPages = Math.max(1, Math.ceil(appState.latestTotal / appState.latestPageSize));
   state.latestPageInfo.textContent = `第 ${appState.latestPage} / ${totalPages} 页，共 ${formatNumber(appState.latestTotal)} 条`;
+  state.latestPageInput.value = String(appState.latestPage);
+  state.latestPageInput.max = String(totalPages);
   state.prevLatestPage.disabled = appState.latestPage <= 1;
   state.nextLatestPage.disabled = appState.latestPage >= totalPages;
 }

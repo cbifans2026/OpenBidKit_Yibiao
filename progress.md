@@ -1,6 +1,27 @@
 # Progress
 
 ## Session Log
+- 已完成 Analytics 北京时间统一修复：客户端新生成 `analytics_created_at` 改为 `Asia/Shanghai` 日期；Worker 公共工具新增北京时间 SQL 表达式和自然日范围；`today/7/30/90` 近期 AE 查询、资源点击、项目兜底、最近事件、留存和 Cron 写入 `first_seen_at` 均统一为北京时间口径。验证通过相关 `node --check`、`cd client; npm run build`、北京时间边界用例和 `git diff --check`，仅有既有 chunk 体积警告与 LF/CRLF 提示。
+- 优化 `/track` D1 热路径：`recordTrackClient()` 现在只对 `client_created_at` 最近 3 天内的客户端尝试实时写 D1；同一 Worker 实例内通过有上限的内存 Set 避免重复尝试；去掉老客户端每条事件的 D1 SELECT；真实插入新客户端后才更新 `stats_totals.total_clients`；D1 写入失败只 warning，`/track` 仍返回成功。验证通过相关 `node --check`、热路径 grep 复扫和 `git diff --check -- analytics`。
+- 修复代码评审指出的历史维度客户端数重复累计问题：新版 migration 增加 `stats_dimension_clients`，Cron 汇总对页面/版本/配置/模型/资源写入 `dimension + client_id` 去重关系，聚合表只累加事件/点击/请求/token，`client_count` 改为从关系表重算累计唯一客户端数。验证通过 `node --check analytics/worker/src/services/analyticsStatsStore.js`、`node --check analytics/worker/src/index.js`、错误模式 grep 复扫和 `git diff --check -- analytics`。
+- Analytics 统计新版完整重构已完成代码接入：旧 `analytics_*` migration、旧 D1 查询服务、旧 daily rollup 服务、旧 `/api/summary` 和旧 backfill 脚本已删除；新增 `stats_*` schema、`analyticsStatsStore.js`、`/api/clients`、`/api/client-detail`，`/track` 写 AE 后实时写 `stats_clients`，Cron 改为北京时间 02:00 汇总前一天数据。
+- Analytics Dashboard 已改造为新版信息架构：概览去掉时间范围和旧冗余卡片；新增“客户端统计”标签页和客户端详情弹窗；访问/配置/模型范围改为历史/今天/7天/30天默认历史；模型使用增加服务商、域名、模型筛选；最近事件增加事件筛选。
+- 文档已同步新版：`analytics/逻辑梳理.md` 改为新版 `stats_*` 数据库和查询逻辑；`analytics/README.md` 改为新版部署、删库重建、接口和口径说明。验证通过 Worker/脚本/Dashboard `node --check`，旧引用扫描通过；`git diff --check -- analytics` 通过，仅有 LF/CRLF 提示。全仓 `git diff --check` 只剩用户先改的 `client/doc/统计改造计划.md` EOF 空行提示，本轮未动该文件。
+- 开始 Analytics 统计功能新版完整重构：已复读 `client/doc/统计改造计划.md`，用户确认 `ANALYTICS_DB` binding 名保留、旧 `openbidkit-analytics` 可直接删库重建；本轮会一次性替换统计 schema、Worker 接口、Cron、Dashboard，并同步 `analytics/逻辑梳理.md`。
+- 开始执行 Analytics 长期统计与历史总数改造：已读取 `client/doc/统计改造计划.md`、恢复文件型计划并运行 session catchup 无输出；本轮范围为 analytics Worker/Dashboard/脚本/迁移，不改桌面客户端埋点入口。
+- Analytics 长期统计 Worker 接入已推进：`/track` 改为先 `ANALYTICS_ROLLUP_QUEUE.send()` 成功后再写 Analytics Engine，Worker `queue()` 已接入 `consumeAnalyticsRollupBatch()`；D1 聚合服务语法检查通过，维度客户端累计改为按关系表重算 totals，D1 batch 超阈值时递归拆子批次并把 done 状态放在同一子批次事务内。
+- Analytics D1 历史查询接口已新增/接入：新增 `analyticsD1Query.js`、`/api/overview`、`/api/traffic`，`/api/summary?range=history`、`/api/config-usage?range=history` 和 `/api/model-usage` 可读 D1，资源点击 `range=history` 读 D1，`/api/projects` 优先 D1 回退 Analytics Engine；相关 Worker JS `node --check` 通过。
+- Analytics Dashboard 已改造为分区范围控制：顶部移除全局时间范围，概览页读 D1 长期累计并保留独立范围分析选择；访问分析、配置使用、模型使用、资源管理分别支持最近 7/30/90 天和历史总数；ADMIN_TOKEN 默认写 sessionStorage，勾选记住后才写 localStorage；生产看板 API 地址固定到 `https://analytics.agnet.top` 或同源。
+- `analytics/README.md` 已补充 D1/Queue 长期统计架构、`setup:analytics-storage`、新增接口、`range=history` 数据源差异、Dashboard Token 存储和指标口径说明。
+- Analytics 长期统计验证完成：Worker 新增/修改模块、Dashboard ES Module、setup/deploy 脚本均通过 `node --check`；`git diff --check` 通过，仅有 LF/CRLF 提示。
+- 已新增 Analytics Engine 到 D1 历史回填脚本 `analytics/scripts/backfill-analytics-rollups.mjs` 和 `npm run backfill:analytics` 命令；脚本支持 `--remote/--local/--dry-run`、默认阻止回填当前业务日，月度聚合写 `source=backfill`，并重算维度客户端 totals。`node --check` 和 dry-run 验证通过。
+- 尝试执行 `npm run setup:analytics-storage` 时 Wrangler 因当前非交互环境缺少 `CLOUDFLARE_API_TOKEN` 停止；远程 `ANALYTICS_DB`/`ANALYTICS_ROLLUP_QUEUE` 尚未在当前 `wrangler.jsonc` 中写入，真实回填需要先配置 Cloudflare 凭据后重跑 setup。
+- 已修复 Analytics 访问分析版本分布与今日活跃口径不一致：近期 Analytics Engine 查询不再过滤空版本，空版本统一归为“未知版本”，今日判断改为 `Asia/Shanghai` 业务日；D1 历史模式也把空 `last_version` 归为“未知版本”，并把今日有活跃但不在版本排行中的版本补入结果。最近事件增加页码输入跳转，后端排序改为稳定时间倒排。
+- 继续 Analytics 长期统计去 Queue 改造：`/track` 当前只写 Analytics Engine；Worker `scheduled()` 调用每日汇总；`analyticsD1Query.js` 已迁移到 `analytics_daily_*` 表和匿名 hash 索引；`setup-analytics-storage.mjs` 已改成只创建/复用 D1、确认 Cron、执行 migration；`wrangler.jsonc` 已加入 `15 18 * * *`。
+- 已重写 `backfill-analytics-rollups.mjs` 为 daily rollup 回填：按上海业务日逐日查询 Analytics Engine，写入 `analytics_daily_summary/page/version/config/model/resource` 和匿名客户端/维度索引，统一 `source=rollup`；`client/doc/统计改造计划.md` 与 `analytics/README.md` 已更新为 D1 + Cron 最终方案，并补充旧 Queue 安全下线顺序。
+- Analytics 去 Queue 改造验证完成：`node --check` 覆盖 `analyticsTrack`、`analyticsDailyRollup`、`analyticsD1Query`、Worker 入口、相关 routes、setup/backfill/deploy 脚本；回填 dry-run 覆盖 2026-03-15 到 2026-06-12 共 90 天；`git diff --check` 通过，仅有 LF/CRLF 提示。
+- 已修复今日活跃客户端与版本分布不一致残留：`/api/summary` 仍过滤 `blob4 != ''` 且按 UTC 判断今日，已改为和 `/api/traffic` 一样把空版本归为“未知版本”、按 `Asia/Shanghai` 判断今日，并补入只在今日活跃但不在范围版本列表中的版本；`/api/traffic` 今日版本查询去掉 `LIMIT 100`，避免版本组被截断。验证通过 `node --check` 和相关 diff check。
+- 已修复“日活客户端大于打开量”的口径漏洞：新增 `analytics_daily_event_client_stats`，Cron/backfill 写入每天每事件去重客户端数；概览今日/昨日/近 7/30 天和每日统计改为按 `app_open` 去重客户端展示，旧行未回填新表时用 `min(active_clients, app_open_count)` 兜底；看板文案从“活跃客户端/客户端数”改为“打开客户端”。验证通过相关 `node --check`、backfill dry-run 和 diff check。
 - 开始废标项检查多投标文件支持：已读取现有计划、确认 catchup 无输出，并记录当前单投标文件边界；下一步从类型和 Store/SQLite schema 开始改造，确保 UI 与后台任务共用同一多文件模型。
 - 继续废标项检查多投标文件支持收尾：`npm run build` 已通过后，复核发现 v12 迁移提前创建 `role/sort_order` 索引会卡住旧库；已改为先处理旧表结构，再创建完整 schema，并用 Electron runtime 冒烟测试确认旧 v11 库可升级到 v12、旧 bid 迁为 `bid-1`、旧结果写入 `bid_document_id=bid-1`。
 - 废标项检查多投标文件支持已完成收尾验证：CJS `node --check` 覆盖 SQLite、fileService、rejectionCheckStore、rejectionCheckTask 和 preload；`cd client; npm run build` 通过，仅有既有 chunk 体积警告；`git diff --check` 通过，仅有 LF/CRLF 提示；旧单文件字段残留复扫无业务依赖。

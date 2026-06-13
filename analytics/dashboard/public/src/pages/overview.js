@@ -2,27 +2,6 @@ import { assertReady, getEncodedProjectAndDays, loadProjectOptions, requestJson,
 import { state } from '../state.js';
 import { formatNumber, formatPercent, renderTable } from '../render.js';
 
-function normalizeDaily(rows, clientRows) {
-  const map = new Map();
-  for (const row of rows || []) {
-    const date = String(row.date || '').slice(0, 10);
-    if (!date) continue;
-    if (!map.has(date)) map.set(date, { date, clients: 0, appOpen: 0, pageView: 0 });
-    const item = map.get(date);
-    if (row.event === 'app_open') item.appOpen += Number(row.count || 0);
-    if (row.event === 'page_view') item.pageView += Number(row.count || 0);
-  }
-
-  for (const row of clientRows || []) {
-    const date = String(row.date || '').slice(0, 10);
-    if (!date) continue;
-    if (!map.has(date)) map.set(date, { date, clients: 0, appOpen: 0, pageView: 0 });
-    map.get(date).clients = Number(row.clients || 0);
-  }
-
-  return Array.from(map.values()).sort((a, b) => b.date.localeCompare(a.date));
-}
-
 function renderGitHubStats(repo) {
   state.githubStars.textContent = repo ? formatNumber(repo.stars) : '-';
   state.githubForks.textContent = repo ? formatNumber(repo.forks) : '-';
@@ -35,30 +14,35 @@ export async function loadOverview() {
   await loadProjectOptions();
   saveSettings();
 
-  const { projectName, days } = getEncodedProjectAndDays();
+  const { projectName } = getEncodedProjectAndDays('30');
   const [summary, retention, githubStats] = await Promise.all([
-    requestJson(`/api/summary?projectName=${projectName}&days=${days}`),
-    requestJson(`/api/retention?projectName=${projectName}&days=${days}`),
+    requestJson(`/api/overview?projectName=${projectName}`),
+    requestJson(`/api/retention?projectName=${projectName}&days=30`),
     requestJson('/api/github-repo-stats').catch(() => ({ repo: null })),
   ]);
 
-  const daily = normalizeDaily(summary.daily || [], summary.dailyClients || []);
-  const totalOpen = daily.reduce((sum, row) => sum + row.appOpen, 0);
-  const totalView = daily.reduce((sum, row) => sum + row.pageView, 0);
+  const daily = (summary.daily || []).map((row) => ({
+    date: row.date,
+    activeClients: formatNumber(row.activeClients),
+    appOpen: formatNumber(row.appOpen),
+    pageView: formatNumber(row.pageView),
+  }));
+  const totalOpen = Number(summary.totalOpen || 0);
+  const totalView = Number(summary.totalView || 0);
 
   state.totalOpen.textContent = formatNumber(totalOpen);
   state.totalView.textContent = formatNumber(totalView);
+  state.totalEvents.textContent = formatNumber(summary.totalEvents);
+  state.totalAiRequests.textContent = formatNumber(summary.totalAiRequests);
   state.totalClients.textContent = formatNumber(summary.totalClients);
   state.todayActiveClients.textContent = formatNumber(summary.todayActiveClients);
-  state.wau.textContent = formatNumber(summary.wau);
-  state.mau.textContent = formatNumber(summary.mau);
-  state.newClients.textContent = formatNumber(summary.newClients);
-  state.returningClients.textContent = formatNumber(summary.returningClients);
+  state.todayNewClients.textContent = formatNumber(summary.todayNewClients);
+  state.last7NewClients.textContent = formatNumber(summary.last7NewClients);
   renderGitHubStats(githubStats.repo);
 
   renderTable(state.dailyTable, daily, [
     { key: 'date', label: '日期' },
-    { key: 'clients', label: '客户端数' },
+    { key: 'activeClients', label: '活跃客户端数' },
     { key: 'appOpen', label: '打开量' },
     { key: 'pageView', label: '页面访问量' },
   ], '暂无每日统计数据');

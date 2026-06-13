@@ -8,6 +8,7 @@ import {
   RESOURCE_TITLE_MAX_LENGTH,
 } from '../constants.js';
 import { corsHeaders, json, methodNotAllowed, requireAdmin, unauthorized } from '../http.js';
+import { queryStatsResourceClickCounts } from '../services/analyticsStatsStore.js';
 import { queryAnalytics } from '../services/analyticsQuery.js';
 import {
   buildResourceImageUrl,
@@ -20,7 +21,7 @@ import {
   readResource,
   upsertResource,
 } from '../services/resourceStore.js';
-import { isValidProjectName, logQueryError, normalizeText, safeDays, sqlString } from '../utils.js';
+import { businessDateRangeCondition, getBusinessDateDaysAgo, getBusinessToday, isValidProjectName, logQueryError, normalizeText, safeDays, sqlString } from '../utils.js';
 
 const allowedImageTypes = new Set(RESOURCE_ALLOWED_IMAGE_TYPES);
 
@@ -109,7 +110,7 @@ async function attachResourceClickStats(env, resources, url) {
 }
 
 async function queryResourceClickCounts(env, resources, url) {
-  if (!env.ACCOUNT_ID || !env.ANALYTICS_API_TOKEN || !resources.length) {
+  if (!resources.length) {
     return new Map();
   }
 
@@ -127,6 +128,21 @@ async function queryResourceClickCounts(env, resources, url) {
     return new Map();
   }
 
+  if (normalizeText(url.searchParams.get('range'), 20) === 'history') {
+    try {
+      const historyCounts = await queryStatsResourceClickCounts(env, projectName, resourceKeys);
+      return new Map(Array.from(historyCounts.entries()).map(([key, value]) => [key, value.clickCount]));
+    } catch (error) {
+      logQueryError('resource clicks history', error);
+      return new Map();
+    }
+  }
+
+  if (!env.ACCOUNT_ID || !env.ANALYTICS_API_TOKEN) {
+    return new Map();
+  }
+
+  const dateWhere = businessDateRangeCondition(getBusinessDateDaysAgo(days - 1), getBusinessToday());
   const sql = `
     SELECT
       blob9 AS resourceKey,
@@ -135,7 +151,7 @@ async function queryResourceClickCounts(env, resources, url) {
     WHERE blob1 = ${sqlString(projectName)}
       AND blob2 = 'resource_click'
       AND blob9 IN (${resourceKeys.map((key) => sqlString(key)).join(', ')})
-      AND timestamp >= NOW() - INTERVAL '${days}' DAY
+      AND ${dateWhere}
     GROUP BY resourceKey
   `;
 
